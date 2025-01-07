@@ -8,7 +8,8 @@
 #include "benchmark.h"
 #include "builder.h"
 #include "command_line.h"
-#include "graph.h"
+//#include "graph.h"
+#include "graph-ralloc.h"
 #include "pvector.h"
 
 /*
