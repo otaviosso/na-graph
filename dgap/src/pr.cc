@@ -10,7 +10,9 @@
 #include "command_line.h"
 #include "graph.h"
 #include "pvector.h"
-
+#include "pr.h"
+#include <omp.h>
+#include <string.h>
 /*
 GAP Benchmark Suite
 Kernel: PageRank (PR)
@@ -98,6 +100,32 @@ bool PRVerifier(const WGraph &g, const ScoreT *scores,
   return error < target_error;
 }
 
+void run_dgap_pagerank(int argc, char* argv[]) {
+    printf("Foi até aqui!\n");
+    
+
+    // Chame a função principal do DGAP
+    CLPageRank cli(argc, argv, "pagerank", 1e-4, 20);
+    if (!cli.ParseArgs())
+        return;
+
+    WeightedBuilder b(cli);
+    WGraph g = b.MakeGraph();
+
+    auto PRBound = [&cli] (const WGraph &g) {
+        return PageRankPull(g, cli.max_iters(), cli.tolerance());
+    };
+
+    auto VerifierBound = [&cli] (const WGraph &g, const ScoreT *scores) {
+        return PRVerifier(g, scores, cli.tolerance());
+    };
+
+    BenchmarkKernel(cli, g, PRBound, PrintTopScores, VerifierBound);
+
+    free(argv[4]); // Libere a memória alocada para o número de threads
+}
+
+/*
 int main(int argc, char* argv[]) {
   CLPageRank cli(argc, argv, "pagerank", 1e-4, 20);
   if (!cli.ParseArgs())
@@ -114,3 +142,4 @@ int main(int argc, char* argv[]) {
   BenchmarkKernel(cli, g, PRBound, PrintTopScores, VerifierBound);
   return 0;
 }
+*/
