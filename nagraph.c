@@ -2,15 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "pagerank.h"
+//#include "connected_components.h"
+#include "options.h"
 
-typedef struct {
-    char *allocator;
-    char *dataset;
-    int threads;
-    char *application;
-    char *numamode;
-    char *backend;
-} Options;
 
 void print_help() {
     printf("Usage: na-graph --allocator <value> --dataset <value> --threads <value>\n");
@@ -58,7 +53,7 @@ int parse_options(int argc, char *argv[], Options *options) {
 }
 
 void run_benchmark(Options *options) {
-    // Aqui você implementará a lógica para executar o benchmark
+    // Show the options
     printf("Running benchmark with options:\n");
     printf("Allocator: %s\n", options->allocator);
     printf("Dataset: %s\n", options->dataset);
@@ -69,9 +64,7 @@ void run_benchmark(Options *options) {
     else
         printf("NUMAMode: Not specified\n");
     printf("Backend: %s\n", options->backend);
-
-    // Aqui você adicionará a lógica para executar o benchmark específico
-    // usando os frameworks e benchmarks especificados.
+    // Choose the right benchmark
     if (strcmp(options->application, "pagerank") == 0) {
         run_pagerank(options);
     } else if (strcmp(options->application, "bc") == 0) {

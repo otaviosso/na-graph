@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-void run_dgap_pagerank(int argc, char* argv[]);
+int run_dgap_pagerank(int argc, char* argv[]);
 
 #ifdef __cplusplus
 }

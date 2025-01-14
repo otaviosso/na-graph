@@ -9,8 +9,8 @@ LDFLAGS = -lstdc++ -lpthread -lpmemobj -lpmem -fopenmp
 TARGET = nagraph
 
 # Arquivos fonte
-SRC_C = nagraph.c pagerank.c
-SRC_CPP = dgap/src/pr.cc
+SRC_C = nagraph.c pagerank.c #connected_components.c
+SRC_CPP = dgap/src/pr.cc #dgap/src/cc_sv.cc
 
 # Arquivos objeto
 OBJ_C = $(SRC_C:.c=.o)

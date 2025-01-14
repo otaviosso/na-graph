@@ -14,7 +14,7 @@
 #include "graph.h"
 #include "pvector.h"
 #include "timer.h"
-
+#include "cc_sv.h"
 
 /*
 GAP Benchmark Suite
@@ -142,6 +142,18 @@ bool CCVerifier(const WGraph &g, const pvector<NodeID> &comp) {
 }
 
 
+int run_dgap_cc(int argc, char* argv[]) {
+  CLApp cli(argc, argv, "connected-components");
+  if (!cli.ParseArgs())
+    return -1;
+  WeightedBuilder b(cli);
+  WGraph g = b.MakeGraph();
+  BenchmarkKernel(cli, g, ShiloachVishkin, PrintCompStats, CCVerifier);
+  return 0;
+}
+
+
+/*
 int main(int argc, char* argv[]) {
   CLApp cli(argc, argv, "connected-components");
   if (!cli.ParseArgs())
@@ -151,3 +163,4 @@ int main(int argc, char* argv[]) {
   BenchmarkKernel(cli, g, ShiloachVishkin, PrintCompStats, CCVerifier);
   return 0;
 }
+*/

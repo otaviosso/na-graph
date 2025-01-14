@@ -1,7 +1,7 @@
 #ifndef OPTIONS_H
 #define OPTIONS_H
 
-// Definição da estrutura Options
+// Definition of Options
 typedef struct {
     char *allocator;
     char *dataset;

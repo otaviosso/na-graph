@@ -1,13 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "pagerank.h"
-#include "dgap/src/pr.h" // Path to DGAP PageRank
+#include "connected_components.h"
+#include "dgap/src/cc_sv.h" // Path to DGAP CC
 
 
 
 
-void run_pagerank(Options *options) {
+void run_cc(Options *options) {
     if (strcmp(options->backend, "DGAP") == 0) {
         printf("Running DGAP PageRank...\n");
         // Arguments for DGAP
@@ -28,7 +28,7 @@ void run_pagerank(Options *options) {
             "-a", // -a
             NULL // Array end
         };
-        run_dgap_pagerank(12, argv); //Number of variables and the array
+        run_dgap_cc(12, argv); //Number of variables and the array
     } else if (strcmp(options->backend, "CSR") == 0) {
         // Add CSR
         printf("Running CSR PageRank...\n");

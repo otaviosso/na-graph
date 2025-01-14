@@ -71,6 +71,8 @@ class CLBase {
   bool ParseArgs() {
     signed char c_opt;
     extern char *optarg;          // from and for getopt
+    extern int optind;
+    optind = 0; // Reset the value because it already was used
     while ((c_opt = getopt(argc_, argv_, get_args_.c_str())) != -1) {
       HandleArg(c_opt, optarg);
     }
