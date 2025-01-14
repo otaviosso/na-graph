@@ -2,15 +2,15 @@
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -O2 -fopenmp
-CXXFLAGS = -std=c++11 -g -rdynamic -O3 -Wall -fopenmp -D_GNU_SOURCE
+CXXFLAGS = -std=c++11 -g -rdynamic -O3 -Wall -fopenmp -D_GNU_SOURCE -Dnagraph
 LDFLAGS = -lstdc++ -lpthread -lpmemobj -lpmem -fopenmp
 
 # Nome do executável final
 TARGET = nagraph
 
 # Arquivos fonte
-SRC_C = nagraph.c pagerank.c #connected_components.c
-SRC_CPP = dgap/src/pr.cc #dgap/src/cc_sv.cc
+SRC_C = nagraph.c pagerank.c connected_components.c
+SRC_CPP = dgap/src/pr.cc dgap/src/cc_sv.cc
 
 # Arquivos objeto
 OBJ_C = $(SRC_C:.c=.o)

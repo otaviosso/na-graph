@@ -145,26 +145,26 @@ inline uint64_t hyperceil(uint64_t x)
 static const int64_t kRandSeed = 27491095;
 
 
-void PrintLabel(const std::string &label, const std::string &val) {
+inline void PrintLabel(const std::string &label, const std::string &val) {
   printf("%-21s%7s\n", (label + ":").c_str(), val.c_str());
 }
 
-void PrintTime(const std::string &s, double seconds) {
+inline void PrintTime(const std::string &s, double seconds) {
   printf("%-21s%3.5lf\n", (s + ":").c_str(), seconds);
 }
 
-void PrintStep(const std::string &s, int64_t count) {
+inline void PrintStep(const std::string &s, int64_t count) {
   printf("%-14s%14" PRId64 "\n", (s + ":").c_str(), count);
 }
 
-void PrintStep(int step, double seconds, int64_t count = -1) {
+inline void PrintStep(int step, double seconds, int64_t count = -1) {
   if (count != -1)
     printf("%5d%11" PRId64 "  %10.5lf\n", step, count, seconds);
   else
     printf("%5d%23.5lf\n", step, seconds);
 }
 
-void PrintStep(const std::string &s, double seconds, int64_t count = -1) {
+inline void PrintStep(const std::string &s, double seconds, int64_t count = -1) {
   if (count != -1)
     printf("%5s%11" PRId64 "  %10.5lf\n", s.c_str(), count, seconds);
   else

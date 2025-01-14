@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "pagerank.h"
-//#include "connected_components.h"
+#include "connected_components.h"
 #include "options.h"
 
 
@@ -71,8 +71,8 @@ void run_benchmark(Options *options) {
         // Adicione a lógica para BC aqui
         printf("Running BC...\n");
     } else if (strcmp(options->application, "cc") == 0) {
-        // Adicione a lógica para CC aqui
         printf("Running CC...\n");
+        run_cc(options);
     } else if (strcmp(options->application, "bfs") == 0) {
         // Adicione a lógica para BFS aqui
         printf("Running BFS...\n");

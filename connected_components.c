@@ -9,7 +9,7 @@
 
 void run_cc(Options *options) {
     if (strcmp(options->backend, "DGAP") == 0) {
-        printf("Running DGAP PageRank...\n");
+        printf("Running DGAP connected components...\n");
         // Arguments for DGAP
         const char* base_graph = "/caminho/para/base.el"; // Change to the right file
         const char* dynamic_graph = "/caminho/para/dynamic.el"; // Change to the right file
@@ -19,7 +19,7 @@ void run_cc(Options *options) {
 
         // Making the arguments array
         char* argv[] = {
-            "dgap_pagerank", // Program name
+            "dgap_cc", // Program name
             "-B", strdup(base_graph),
             "-D", strdup(dynamic_graph),
             "-f", strdup(pmem_path),

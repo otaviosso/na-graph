@@ -100,6 +100,7 @@ bool PRVerifier(const WGraph &g, const ScoreT *scores,
   return error < target_error;
 }
 
+#ifdef nagraph
 int run_dgap_pagerank(int argc, char* argv[]) {
   CLPageRank cli(argc, argv, "pagerank", 1e-4, 20);
   if (!cli.ParseArgs())
@@ -117,7 +118,7 @@ int run_dgap_pagerank(int argc, char* argv[]) {
   return 0;
 }
 
-/*
+#else
 int main(int argc, char* argv[]) {
   CLPageRank cli(argc, argv, "pagerank", 1e-4, 20);
   if (!cli.ParseArgs())
@@ -134,4 +135,4 @@ int main(int argc, char* argv[]) {
   BenchmarkKernel(cli, g, PRBound, PrintTopScores, VerifierBound);
   return 0;
 }
-*/
+#endif

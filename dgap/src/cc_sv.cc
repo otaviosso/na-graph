@@ -141,7 +141,7 @@ bool CCVerifier(const WGraph &g, const pvector<NodeID> &comp) {
   return true;
 }
 
-
+#ifdef nagraph
 int run_dgap_cc(int argc, char* argv[]) {
   CLApp cli(argc, argv, "connected-components");
   if (!cli.ParseArgs())
@@ -153,7 +153,7 @@ int run_dgap_cc(int argc, char* argv[]) {
 }
 
 
-/*
+#else
 int main(int argc, char* argv[]) {
   CLApp cli(argc, argv, "connected-components");
   if (!cli.ParseArgs())
@@ -163,4 +163,4 @@ int main(int argc, char* argv[]) {
   BenchmarkKernel(cli, g, ShiloachVishkin, PrintCompStats, CCVerifier);
   return 0;
 }
-*/
+#endif
