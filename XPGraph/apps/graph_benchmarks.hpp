@@ -187,7 +187,7 @@ void test_graph_benchmarks_numa(XPGraph* xpgraph){
     ofs << std::endl;
     ofs.close();
 }
-
+/*
 void test_gapbs_graph_benchmarks(XPGraph* xpgraph){
   uint8_t count = xpgraph->get_query_count();
   if(count == 0) return;
@@ -239,4 +239,89 @@ void test_gapbs_graph_benchmarks(XPGraph* xpgraph){
 #pragma endregion test_gapbs_graph_benchmarks
   ofs << std::endl;
   ofs.close();
+}
+*/
+void test_gapbs_pr(XPGraph* xpgraph) {
+    std::string statistic_filename = "xpgraph_query.csv";
+    std::ofstream ofs;
+    ofs.open(statistic_filename.c_str(), std::ofstream::out | std::ofstream::app);
+    ofs << "[QueryTimings]:" << std::endl;
+
+    double start, end;
+    std::cout << "<<<<<<<<<ALGO: PAGERANK>>>>>>>>>" << std::endl;
+    start = mywtime();
+    pvector<ScoreT> pr_ret = run_pr(xpgraph, 20);
+    end = mywtime();
+    std::cout << "PageRank time = " << (end - start) << std::endl;
+    PrintTopPRScores(xpgraph, pr_ret);
+    ofs << "PageRank," << (end - start) << std::endl;
+
+    ofs.close();
+}
+
+void test_gapbs_bfs(XPGraph* xpgraph) {
+    std::string statistic_filename = "xpgraph_query.csv";
+    std::ofstream ofs;
+    ofs.open(statistic_filename.c_str(), std::ofstream::out | std::ofstream::app);
+    ofs << "[QueryTimings]:" << std::endl;
+
+    double start, end;
+    std::cout << "<<<<<<<<<ALGO: BFS>>>>>>>>>" << std::endl;
+    start = mywtime();
+    pvector<vid_t> bfs_ret = run_bfs(xpgraph, xpgraph->get_out_edge_count(), xpgraph->get_source_vertex());
+    end = mywtime();
+    PrintBFSStats(xpgraph, bfs_ret);
+    std::cout << "test_gapbs_bfs for " << xpgraph->get_source_vertex() << " root vertex, sum of frontier count = " << bfs_ret.size() << ", BFS Time = " << end - start << std::endl;
+    ofs << "BFS," << (end - start) << std::endl;
+
+    ofs.close();
+}
+
+void test_gapbs_bc(XPGraph* xpgraph) {
+    std::string statistic_filename = "xpgraph_query.csv";
+    std::ofstream ofs;
+    ofs.open(statistic_filename.c_str(), std::ofstream::out | std::ofstream::app);
+    ofs << "[QueryTimings]:" << std::endl;
+
+    double start, end;
+    std::cout << "<<<<<<<<<ALGO: BC>>>>>>>>>" << std::endl;
+    start = mywtime();
+    pvector<ScoreT> bc_ret = run_bc(xpgraph, xpgraph->get_out_edge_count(), xpgraph->get_source_vertex(), 1);
+    end = mywtime();
+    std::cout << "BC time = " << (end - start) << std::endl;
+    PrintTopScores(xpgraph, bc_ret);
+    ofs << "BC," << (end - start) << std::endl;
+
+    ofs.close();
+}
+
+void test_gapbs_cc_sv(XPGraph* xpgraph) {
+    std::string statistic_filename = "xpgraph_query.csv";
+    std::ofstream ofs;
+    ofs.open(statistic_filename.c_str(), std::ofstream::out | std::ofstream::app);
+    ofs << "[QueryTimings]:" << std::endl;
+
+    double start, end;
+    std::cout << "<<<<<<<<<ALGO: CC_SV>>>>>>>>>" << std::endl;
+    start = mywtime();
+    pvector<vid_t> cc_ret = run_cc(xpgraph);
+    end = mywtime();
+    std::cout << "CC time = " << (end - start) << std::endl;
+    PrintCompStats(xpgraph, cc_ret);
+    ofs << "CC_SV," << (end - start) << std::endl;
+
+    ofs.close();
+}
+
+void test_gapbs_graph_benchmarks(XPGraph* xpgraph) {
+    uint8_t count = xpgraph->get_query_count();
+    if (count == 0) return;
+
+    while (count--) {
+        test_gapbs_pr(xpgraph);
+        test_gapbs_bfs(xpgraph);
+        test_gapbs_bc(xpgraph);
+        test_gapbs_cc_sv(xpgraph);
+        std::cout << std::endl;
+    }
 }

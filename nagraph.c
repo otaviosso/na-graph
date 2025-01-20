@@ -66,16 +66,17 @@ void run_benchmark(Options *options) {
     printf("Backend: %s\n", options->backend);
     // Choose the right benchmark
     if (strcmp(options->application, "pagerank") == 0) {
+        printf("Running PageRank...\n");
         run_pagerank(options);
     } else if (strcmp(options->application, "bc") == 0) {
-        // Adicione a lógica para BC aqui
         printf("Running BC...\n");
+        // Adicione a lógica para BC aqui
     } else if (strcmp(options->application, "cc") == 0) {
         printf("Running CC...\n");
         run_cc(options);
     } else if (strcmp(options->application, "bfs") == 0) {
-        // Adicione a lógica para BFS aqui
         printf("Running BFS...\n");
+        // Adicione a lógica para BFS aqui
     } else {
         fprintf(stderr, "Unsupported application: %s\n", options->application);
         exit(EXIT_FAILURE);
