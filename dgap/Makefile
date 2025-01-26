@@ -19,14 +19,18 @@ ifneq ($(SERIAL), 1)
 endif
 
 KERNELS = bc bfs cc_sv pr
+COMMON = benchmark.h reader.h writer.h bitmap.h sliding_queue.h builder.h platform_atomics.h timer.h command_line.h pvector.h util.h 
 SUITE = $(KERNELS)
 
 .PHONY: all
 all: $(SUITE)
 
-% : src/%.cc src/*.h
+ralloc: src/$(KERNELS).cc src/graph-ralloc.h src/$(COMMON) 
 	(cd $(RALLOC_PATH)/test && make libralloc.a)
 	$(CXX) -L $(RALLOC_PATH)/test -I$(RALLOC_PATH)/src  $< -o $@ $(CXX_FLAGS) $(LDLIBS)
+
+pmdk: src/%.cc src/$(COMMON) src/graph.h
+	$(CXX) $< -o $@ $(CXX_FLAGS) $(LDLIBS)
 
 .PHONY: clean
 clean:
