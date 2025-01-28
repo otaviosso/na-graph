@@ -250,7 +250,7 @@ void test_gapbs_pr(XPGraph* xpgraph) {
     double start, end;
     std::cout << "<<<<<<<<<ALGO: PAGERANK>>>>>>>>>" << std::endl;
     start = mywtime();
-    pvector<ScoreT> pr_ret = run_pr(xpgraph, 20);
+    pvector<ScoreT> pr_ret = run_pr(xpgraph, 20); //Change to run_pr_numa for numa
     end = mywtime();
     std::cout << "PageRank time = " << (end - start) << std::endl;
     PrintTopPRScores(xpgraph, pr_ret);

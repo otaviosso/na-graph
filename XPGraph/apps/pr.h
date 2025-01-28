@@ -97,6 +97,86 @@ pvector<ScoreT> run_pr(XPGraph* snaph, int max_iters, double epsilon = 0)
   return scores;
 }
 
+pvector<ScoreT> run_pr_numa(XPGraph* snaph, int max_iters, double epsilon = 0) {
+  const ScoreT init_score = 1.0f / snaph->get_vcount();
+  const ScoreT base_score = (1.0f - kDamp) / snaph->get_vcount();
+  pvector<ScoreT> scores(snaph->get_vcount(), init_score);
+  pvector<ScoreT> outgoing_contrib(snaph->get_vcount());
+
+  uint8_t NUM_SOCKETS = 2; // Assuming 2 NUMA sockets
+  tid_t ncores_per_socket = omp_get_max_threads() / NUM_SOCKETS / 2; // Adjust based on your system
+
+  for (int iter = 0; iter < max_iters; iter++) {
+      double error = 0;
+
+      // First phase: Compute outgoing contributions
+      #pragma omp parallel
+      {
+          tid_t tid = omp_get_thread_num();
+          for (int id = 0; id < NUM_SOCKETS; ++id) {
+              if ((tid >= ncores_per_socket * id && tid < ncores_per_socket * (id + 1)) ||
+                  (tid >= ncores_per_socket * NUM_SOCKETS + ncores_per_socket * id && 
+                    tid < ncores_per_socket * NUM_SOCKETS + ncores_per_socket * (id + 1))) {
+                  snaph->bind_cpu(tid, id);
+
+                  #pragma omp for schedule(static)
+                  for (vid_t n = id; n < snaph->get_vcount(); n += NUM_SOCKETS) {
+                      outgoing_contrib[n] = scores[n] / snaph->get_out_degree(n);
+                  }
+
+                  snaph->cancel_bind_cpu();
+              }
+          }
+      }
+
+      // Second phase: Update scores and compute error
+      #pragma omp parallel reduction(+ : error)
+      {
+          tid_t tid = omp_get_thread_num();
+          for (int id = 0; id < NUM_SOCKETS; ++id) {
+              if ((tid >= ncores_per_socket * id && tid < ncores_per_socket * (id + 1)) ||
+                  (tid >= ncores_per_socket * NUM_SOCKETS + ncores_per_socket * id && 
+                    tid < ncores_per_socket * NUM_SOCKETS + ncores_per_socket * (id + 1))) {
+                  snaph->bind_cpu(tid, id);
+
+                  #pragma omp for schedule(dynamic, 64)
+                  for (vid_t u = id; u < snaph->get_vcount(); u += NUM_SOCKETS) {
+                      ScoreT incoming_total = 0;
+
+                      sid_t sid;
+                      degree_t nebr_count = 0;
+                      degree_t local_degree = 0;
+                      vid_t* local_adjlist;
+                      nebr_count = snaph->get_in_degree(u);
+                      if (0 == nebr_count) continue;
+
+                      local_adjlist = new vid_t[nebr_count];
+                      local_degree = snaph->get_in_nebrs(u, local_adjlist);
+                      assert(local_degree == nebr_count);
+
+                      // Traverse the delta adj list
+                      for (index_t j = 0; j < local_degree; ++j) {
+                          sid = local_adjlist[j];
+                          incoming_total += outgoing_contrib[sid];
+                      }
+                      delete[] local_adjlist;
+
+                      ScoreT old_score = scores[u];
+                      scores[u] = base_score + kDamp * incoming_total;
+                      error += fabs(scores[u] - old_score);
+                  }
+
+                  snaph->cancel_bind_cpu();
+              }
+          }
+      }
+  }
+
+  return scores;
+}
+
+
+
 void PrintTopPRScores(XPGraph* snaph, const pvector<ScoreT> &scores) {
   vector<std::pair<vid_t, ScoreT>> score_pairs(snaph->get_vcount());
   for (vid_t n=0; n < snaph->get_vcount(); n++) {
