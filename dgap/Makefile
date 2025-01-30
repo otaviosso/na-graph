@@ -1,7 +1,7 @@
 # See LICENSE.txt for license details.
 
 CXX_FLAGS += -std=c++11 -g -rdynamic -O3 -Wall -g
-LDLIBS = -lpmemobj -lpmem -lralloc -lpthread
+LDLIBS = -lpmemobj -lpmem -lpthread
 PAR_FLAG = -fopenmp
 RALLOC_PATH = ../ralloc
 
@@ -19,18 +19,23 @@ ifneq ($(SERIAL), 1)
 endif
 
 KERNELS = bc bfs cc_sv pr
-COMMON = benchmark.h reader.h writer.h bitmap.h sliding_queue.h builder.h platform_atomics.h timer.h command_line.h pvector.h util.h 
+# COMMON = benchmark.h reader.h writer.h bitmap.h sliding_queue.h builder.h platform_atomics.h timer.h command_line.h pvector.h util.h 
 SUITE = $(KERNELS)
 
 .PHONY: all
 all: $(SUITE)
+ralloc: CXX_FLAGS += -lralloc -I$(RALLOC_PATH)/src -L $(RALLOC_PATH)/test -DRALLOC
+ralloc: libralloc.a $(SUITE)
 
-ralloc: src/$(KERNELS).cc src/graph-ralloc.h src/$(COMMON) 
-	(cd $(RALLOC_PATH)/test && make libralloc.a)
-	$(CXX) -L $(RALLOC_PATH)/test -I$(RALLOC_PATH)/src  $< -o $@ $(CXX_FLAGS) $(LDLIBS)
+libralloc.a:
+	cd $(RALLOC_PATH)/test && make libralloc.a
 
-pmdk: src/%.cc src/$(COMMON) src/graph.h
+% : src/%.cc src/*.h
 	$(CXX) $< -o $@ $(CXX_FLAGS) $(LDLIBS)
+ 
+
+pmdk: CXX_FLAGS += -DPMDK 
+pmdk: $(SUITE)
 
 .PHONY: clean
 clean:

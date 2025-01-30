@@ -34,6 +34,7 @@
 
 #include "pvector.h"
 #include "util.h"
+#include "timer.h"
 
 using namespace std;
 
@@ -304,8 +305,20 @@ class CSRGraph {
 public:
   
   struct Base* bp; 
+  int edge_log_count = 0;
+  int ulog_count = 0;
+  int resize_count = 0;
+
+  double edge_log_secs = 0;
+  Timer edge_log_timer;
+  double ulog_secs = 0;
+  Timer ulog_timer;
+  double resize_secs = 0;
+  Timer resize_timer;
 
   ~CSRGraph() {
+	printf("Edge log count: %d Ulog count: %d Resize count: %d\n", edge_log_count, ulog_count, resize_count);
+	printf("Total edge log update time: %.5g Total ulog update time: %.5g Total resize time: %.5g\n", edge_log_secs, ulog_secs, resize_secs);
     memcpy(vertices_pm, vertices_, num_vertices * sizeof(struct vertex_element));
     RP_set_root(vertices_pm, VERTEX_ROOT);
 
@@ -747,7 +760,9 @@ public:
    *                                                                           *
    *****************************************************************************/
   /// Double the size of the "edges_" array
-  void resize_V1() { // stopped here
+  void resize_V1() { 
+	resize_count++;
+	resize_timer.Start();
     elem_capacity *= 2;
     int64_t gaps = elem_capacity - num_edges_;
     int64_t *new_indices = calculate_positions(0, num_vertices, gaps, num_edges_);
@@ -788,7 +803,6 @@ public:
       vertices_[vi].offset = -1;
     }
 
-    //RP_set_root(new_edges_, NEW_EDGES_ROOT);
 
     RP_free(edges_pm);
     edges_pm = new_edges_;
@@ -806,6 +820,8 @@ public:
     for (int32_t i = st_seg; i < nd_seg; i += 1) {
       release_log(i - segment_count);
     }
+	resize_timer.Stop();
+	resize_secs += resize_timer.Seconds();
   }
 
   inline int32_t get_segment_id(int32_t vertex_id) {
@@ -1050,6 +1066,7 @@ public:
 
   /// Insert an edge into edge-log.
   inline void insert_into_log(int32_t segment_id, int32_t src, int32_t dst) {
+    edge_log_count++;
     assert(log_segment_idx_[segment_id] < MAX_LOG_ENTRIES &&
            "logs are full, need to perform a rebalance first");
     assert(vertices_[src].offset < MAX_LOG_ENTRIES &&
@@ -1058,16 +1075,19 @@ public:
            "src vertex is not for this segment-id");
 
     // insert into log -- return later
+	edge_log_timer.Start();
     struct LogEntry *log_ins_ptr = (struct LogEntry *) (log_ptr_[segment_id] + log_segment_idx_[segment_id]);
     log_ins_ptr->u = src;
     log_ins_ptr->v = dst;
     log_ins_ptr->prev_offset = vertices_[src].offset;
 
     //flush_clwb_nolog(log_ins_ptr, sizeof(struct LogEntry));
-	//RP_set_root(log_segment_pm, LOG_SEG_ROOT);
+	RP_set_root(log_segment_pm, LOG_SEG_ROOT);
 
     vertices_[src].offset = log_segment_idx_[segment_id];
     log_segment_idx_[segment_id] += 1;
+	edge_log_timer.Stop();
+	edge_log_secs += edge_log_timer.Seconds();
   }
 
   /// Print all the edges of vertex @vid stored in the per-seg-logs.
@@ -1109,7 +1129,7 @@ public:
     
     // return later
     //flush_clwb_nolog(&log_ptr_[segment_id], sizeof(struct LogEntry) * log_segment_idx_[segment_id]);
-	//RP_set_root(log_segment_pm, LOG_SEG_ROOT);
+	RP_set_root(log_segment_pm, LOG_SEG_ROOT);
     log_segment_idx_[segment_id] = 0;
   }
 
@@ -1282,7 +1302,9 @@ public:
   /// Finally, make an entry in the oplog to track the @edge_array range saved in the ulog
   inline void
   load_into_ulog(int tid, int64_t load_idx_st, int32_t load_sz, int64_t flush_idx_st, int64_t flush_idx_nd) {
-    // return later
+    ulog_count++;
+	
+	ulog_timer.Start();
     // flush the last entries
     if (flush_idx_st != flush_idx_nd) {
       //flush_clwb_nolog(&edges_[flush_idx_st], sizeof(DestID_) * (flush_idx_nd - flush_idx_st + 1));
@@ -1293,7 +1315,9 @@ public:
     //flush_clwb_nolog(&ulog_ptr_[tid], sizeof(DestID_) * MAX_ULOG_ENTRIES);
     oplog_ptr_[tid] = load_idx_st;
 	//flush_clwb_nolog(&oplog_ptr_[tid], sizeof(int64_t));
-	RP_set_root(oplog_pm, OPLOG_ROOT);	
+	RP_set_root(oplog_pm, OPLOG_ROOT);
+	ulog_timer.Stop();
+	ulog_secs += ulog_timer.Seconds();
   }
 
   inline void

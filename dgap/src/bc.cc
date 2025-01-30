@@ -9,8 +9,12 @@
 #include "bitmap.h"
 #include "builder.h"
 #include "command_line.h"
-//#include "graph.h"
+#ifdef PMDK
+#include "graph.h"
+#endif
+#ifdef RALLOC
 #include "graph-ralloc.h"
+#endif
 #include "platform_atomics.h"
 #include "pvector.h"
 #include "sliding_queue.h"

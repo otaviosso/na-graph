@@ -10,8 +10,12 @@
 #include <string>
 #include <type_traits>
 
+#ifdef PMDK
 #include "graph.h"
-//#include "graph-ralloc.h"
+#endif
+#ifdef RALLOC
+#include "graph-ralloc.h"
+#endif
 
 
 /*

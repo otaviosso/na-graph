@@ -12,8 +12,12 @@
 #include <utility>
 
 #include "command_line.h"
+#ifdef PMDK
 #include "graph.h"
-//#include "graph-ralloc.h"
+#endif
+#ifdef RALLOC
+#include "graph-ralloc.h"
+#endif
 #include "platform_atomics.h"
 #include "pvector.h"
 #include "reader.h"

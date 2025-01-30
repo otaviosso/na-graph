@@ -8,8 +8,12 @@
 #include "benchmark.h"
 #include "builder.h"
 #include "command_line.h"
-//#include "graph.h"
+#ifdef PMDK
+#include "graph.h"
+#endif
+#ifdef RALLOC
 #include "graph-ralloc.h"
+#endif
 #include "pvector.h"
 
 /*

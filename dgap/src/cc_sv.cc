@@ -11,8 +11,12 @@
 #include "bitmap.h"
 #include "builder.h"
 #include "command_line.h"
+#ifdef PMDK
 #include "graph.h"
-//#include "graph-ralloc.h"
+#endif
+#ifdef RALLOC
+#include "graph-ralloc.h"
+#endif
 #include "pvector.h"
 #include "timer.h"
 

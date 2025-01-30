@@ -6,8 +6,12 @@
 #include "benchmark.h"
 #include "builder.h"
 #include "command_line.h"
+#ifdef PMDK
 #include "graph.h"
-//#include "graph-ralloc.h"
+#endif
+#ifdef RALLOC
+#include "graph-ralloc.h"
+#endif
 #include "reader.h"
 #include "writer.h"
 
