@@ -110,7 +110,7 @@ public:
     uint8_t get_socket_id(vid_t vid);
     void bind_cpu(tid_t tid, uint8_t socket_id);
     void bind_cpu_edit(tid_t tid, uint8_t socket_id);
-    void bind_thread_to_cpu_edit(int cpu_id)
+    void bind_thread_to_cpu_edit(int cpu_id);
     void cancel_bind_cpu();
     uint8_t get_query_count();
 };
