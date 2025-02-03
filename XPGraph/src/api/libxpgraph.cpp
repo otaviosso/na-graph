@@ -356,7 +356,7 @@ void XPGraph::bind_cpu_edit(tid_t tid, uint8_t socket_id){
     } else if(socket_id == 1){
         if(tid >= 0 && tid < 24) bind_thread_to_cpu_edit(tid + 72);
         else if(tid < 48) bind_thread_to_cpu_edit(tid);
-        else cancel_thread_bind_edit(); // only 48 cores available, other threads need to access PM across NUMA node
+        else cancel_thread_bind(); // only 48 cores available, other threads need to access PM across NUMA node
     } else {
         std::cout << "Wrong socket id: " << socket_id << std::endl;
         assert(0);
