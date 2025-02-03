@@ -57,45 +57,48 @@ pvector<ScoreT> run_pr(XPGraph* snaph, int max_iters, double epsilon = 0)
         incoming_total += outgoing_contrib[sid];
       }
       delete [] local_adjlist;
-
-
-//      sid_t sid;
-//      degree_t      delta_degree = 0;
-//      degree_t nebr_count = 0;
-//      degree_t local_degree = 0;
-//      delta_adjlist_t<dst_id_t>* delta_adjlist;
-//      dst_id_t* local_adjlist = 0;
-//      delta_adjlist = snaph->get_nebrs_archived_in(u);
-//      if (0 == delta_adjlist) continue;
-//      nebr_count = snaph->get_in_degree(u);
-//
-//      //traverse the delta adj list
-//      delta_degree = nebr_count;
-//      while (delta_adjlist != 0 && delta_degree > 0) {
-//        local_adjlist = delta_adjlist->get_adjlist();
-//        local_degree = delta_adjlist->get_nebrcount();
-//        degree_t i_count = std::min(local_degree, delta_degree);
-//        for (degree_t i = 0; i < i_count; ++i) {
-//          sid = get_sid(local_adjlist[i]);
-////          rank += prior_rank_array[sid];
-//          incoming_total += outgoing_contrib[sid];
-//        }
-//        delta_adjlist = delta_adjlist->get_next();
-//        delta_degree -= local_degree;
-//      }
-
-//      for (vid_t v : snaph->in_neigh(u))
-//        incoming_total += outgoing_contrib[v];
       ScoreT old_score = scores[u];
       scores[u] = base_score + kDamp * incoming_total;
       error += fabs(scores[u] - old_score);
     }
-//    printf(" %2d    %lf\n", iter, error);
-//    if (error < epsilon)
-//      break;
   }
   return scores;
 }
+
+void cancel_thread_bind_edit(){
+    uint8_t cpu_num = std::thread::hardware_concurrency();
+    // std::cout << "In cancel_thread_bind(), cpu_num = " << (uint32_t)cpu_num << std::endl; // 96
+    cpu_set_t cpu_mask;
+    CPU_ZERO(&cpu_mask);
+    for(uint8_t cpu_id = 0; cpu_id < cpu_num; cpu_id++)
+        CPU_SET(cpu_id, &cpu_mask);
+    // sched_setaffinity(gettid(), sizeof(cpu_mask), &cpu_mask);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_mask), &cpu_mask);
+}
+
+void bind_thread_to_cpu_edit(int cpu_id){
+    cpu_set_t cpu_mask;
+    CPU_ZERO(&cpu_mask);
+    CPU_SET(cpu_id, &cpu_mask);
+    // sched_setaffinity(gettid(), sizeof(cpu_mask), &cpu_mask);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_mask), &cpu_mask);
+}
+
+void bind_cpu_edit(tid_t tid, int socket_id){
+    if(socket_id == 0){
+        if(tid >= 0 && tid < 24) bind_thread_to_cpu_edit(tid);
+        else if(tid < 48) bind_thread_to_cpu_edit(tid + 24);
+        // else cancel_thread_bind(); // only 48 cores available, other threads need to access PM across NUMA node
+    } else if(socket_id == 1){
+        if(tid >= 0 && tid < 24) bind_thread_to_cpu_edit(tid + 72);
+        else if(tid < 48) bind_thread_to_cpu_edit(tid);
+        else cancel_thread_bind_edit(); // only 48 cores available, other threads need to access PM across NUMA node
+    } else {
+        std::cout << "Wrong socket id: " << socket_id << std::endl;
+        assert(0);
+    }
+}
+
 
 pvector<ScoreT> run_pr_numa(XPGraph* snaph, int max_iters, double epsilon = 0) {
   const ScoreT init_score = 1.0f / snaph->get_vcount();
@@ -117,14 +120,14 @@ pvector<ScoreT> run_pr_numa(XPGraph* snaph, int max_iters, double epsilon = 0) {
               if ((tid >= ncores_per_socket * id && tid < ncores_per_socket * (id + 1)) ||
                   (tid >= ncores_per_socket * NUM_SOCKETS + ncores_per_socket * id && 
                     tid < ncores_per_socket * NUM_SOCKETS + ncores_per_socket * (id + 1))) {
-                  snaph->bind_cpu(tid, id);
+                  snaph->bind_cpu_edit(tid, id);
 
                   #pragma omp for schedule(static)
                   for (vid_t n = id; n < snaph->get_vcount(); n += NUM_SOCKETS) {
                       outgoing_contrib[n] = scores[n] / snaph->get_out_degree(n);
                   }
 
-                  snaph->cancel_bind_cpu();
+                  snaph->cancel_bind_cpu_edit();
               }
           }
       }
