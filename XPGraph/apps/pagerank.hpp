@@ -277,39 +277,6 @@ void test_pagerank_push(XPGraph* xpgraph, int iteration_count){
 	// // std::cout << std::endl;
     // return end - start;
 }
-void cancel_thread_bind_edit(){
-    uint8_t cpu_num = std::thread::hardware_concurrency();
-    // std::cout << "In cancel_thread_bind(), cpu_num = " << (uint32_t)cpu_num << std::endl; // 96
-    cpu_set_t cpu_mask;
-    CPU_ZERO(&cpu_mask);
-    for(uint8_t cpu_id = 0; cpu_id < cpu_num; cpu_id++)
-        CPU_SET(cpu_id, &cpu_mask);
-    // sched_setaffinity(gettid(), sizeof(cpu_mask), &cpu_mask);
-    pthread_setaffinity_np(pthread_self(), sizeof(cpu_mask), &cpu_mask);
-}
-
-void bind_thread_to_cpu_edit(int cpu_id){
-    cpu_set_t cpu_mask;
-    CPU_ZERO(&cpu_mask);
-    CPU_SET(cpu_id, &cpu_mask);
-    // sched_setaffinity(gettid(), sizeof(cpu_mask), &cpu_mask);
-    pthread_setaffinity_np(pthread_self(), sizeof(cpu_mask), &cpu_mask);
-}
-
-void bind_cpu_edit(tid_t tid, int socket_id){
-    if(socket_id == 0){
-        if(tid >= 0 && tid < 24) bind_thread_to_cpu_edit(tid);
-        else if(tid < 48) bind_thread_to_cpu_edit(tid + 24);
-        // else cancel_thread_bind(); // only 48 cores available, other threads need to access PM across NUMA node
-    } else if(socket_id == 1){
-        if(tid >= 0 && tid < 24) bind_thread_to_cpu_edit(tid + 72);
-        else if(tid < 48) bind_thread_to_cpu_edit(tid);
-        else cancel_thread_bind_edit(); // only 48 cores available, other threads need to access PM across NUMA node
-    } else {
-        std::cout << "Wrong socket id: " << socket_id << std::endl;
-        assert(0);
-    }
-}
 
 void test_pagerank_pull_numa(XPGraph* xpgraph, int iteration_count){
     std::cout << "test_pagerank_pull_numa..." << std::endl;

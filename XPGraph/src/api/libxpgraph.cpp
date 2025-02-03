@@ -340,6 +340,29 @@ void XPGraph::bind_cpu(tid_t tid, uint8_t socket_id){
     bind_thread_to_socket(tid, socket_id);
 }
 
+void bind_thread_to_cpu_edit(int cpu_id){
+    cpu_set_t cpu_mask;
+    CPU_ZERO(&cpu_mask);
+    CPU_SET(cpu_id, &cpu_mask);
+    // sched_setaffinity(gettid(), sizeof(cpu_mask), &cpu_mask);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_mask), &cpu_mask);
+}
+
+void XPGraph::bind_cpu_edit(tid_t tid, int socket_id){
+    if(socket_id == 0){
+        if(tid >= 0 && tid < 24) bind_thread_to_cpu_edit(tid);
+        else if(tid < 48) bind_thread_to_cpu_edit(tid + 24);
+        // else cancel_thread_bind(); // only 48 cores available, other threads need to access PM across NUMA node
+    } else if(socket_id == 1){
+        if(tid >= 0 && tid < 24) bind_thread_to_cpu_edit(tid + 72);
+        else if(tid < 48) bind_thread_to_cpu_edit(tid);
+        else cancel_thread_bind_edit(); // only 48 cores available, other threads need to access PM across NUMA node
+    } else {
+        std::cout << "Wrong socket id: " << socket_id << std::endl;
+        assert(0);
+    }
+}
+
 void XPGraph::cancel_bind_cpu(){
     cancel_thread_bind();
 }
