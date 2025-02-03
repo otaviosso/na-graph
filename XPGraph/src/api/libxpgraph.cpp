@@ -348,7 +348,7 @@ void bind_thread_to_cpu_edit(int cpu_id){
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_mask), &cpu_mask);
 }
 
-void XPGraph::bind_cpu_edit(tid_t tid, int socket_id){
+void XPGraph::bind_cpu_edit(tid_t tid, uint8_t socket_id){
     if(socket_id == 0){
         if(tid >= 0 && tid < 24) bind_thread_to_cpu_edit(tid);
         else if(tid < 48) bind_thread_to_cpu_edit(tid + 24);
