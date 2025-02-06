@@ -20,7 +20,6 @@ def validate_arguments(framework, benchmark, args):
         "GraphOne": ["base_file", "dynamic_file", "output_path", "source_node", "vertices", "threads"],
         "XPGraph": ["base_file", "dynamic_file", "output_path", "source_node", "vertices", "threads", "recovery_dir", "query_times"],
     }
-
     for arg in required_args[framework]:
         value = getattr(args, arg)
         if value is None:
@@ -53,13 +52,16 @@ def run_benchmark(framework, benchmark, base_file, dynamic_file, output_path, so
             "-b", base_file, "-d", dynamic_file, "-o", output_path, "-v", str(vertices), "-j", str(job), "-s", str(source_node), "-t", str(threads)
         ]
     elif framework == "XPGraph":
+        # Updated command for XPGraph to run separate executables (e.g., ./pr, ./bfs, etc.)
+        executable = os.path.join(framework_dir, f"./{benchmark}")
         command = [
-            os.path.join(framework_dir, "./xpgraph"),  # Executável dentro da pasta do framework
-            "-f", base_file, "-p0", output_path, "--recovery", recovery_dir, "--source", str(source_node), "-v", str(vertices), "-q", str(query_times), "-j", "2", "-t", str(threads)
+            executable,
+            "-f", base_file, "-p0", output_path, "--recovery", recovery_dir, "--source", str(source_node),
+            "-v", str(vertices), "-q", str(query_times), "-t", str(threads)
         ]
     else:
         raise ValueError(f"Framework {framework} não suportado.")
-
+    
     # Executa o comando
     print(f"Executando {benchmark} no {framework}...")
     result = subprocess.run(command, capture_output=True, text=True)
@@ -84,12 +86,11 @@ def main():
     parser.add_argument("--threads", type=int, default=1, help="Número de threads (apenas para GraphOne e XPGraph).")
     parser.add_argument("--recovery_dir", help="Diretório de recuperação (apenas para XPGraph).")
     parser.add_argument("--query_times", type=int, help="Número de vezes para executar a análise (apenas para XPGraph).")
-
     args = parser.parse_args()
-
+    
     # Valida os argumentos necessários
     validate_arguments(args.framework, args.benchmark, args)
-
+    
     run_benchmark(
         framework=args.framework,
         benchmark=args.benchmark,
