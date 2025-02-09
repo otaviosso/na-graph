@@ -9,7 +9,7 @@ int main(int argc, const char ** argv) {
     if (count == 0) return 0;
 
     while (count--) {
-        test_gapbs_pr(xpgraph);
+        test_gapbs_pr_numa(xpgraph);
         std::cout << std::endl;
     }
     

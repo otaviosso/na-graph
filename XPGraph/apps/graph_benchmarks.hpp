@@ -259,6 +259,24 @@ void test_gapbs_pr(XPGraph* xpgraph) {
     ofs.close();
 }
 
+void test_gapbs_pr_numa(XPGraph* xpgraph) {
+    std::string statistic_filename = "xpgraph_query.csv";
+    std::ofstream ofs;
+    ofs.open(statistic_filename.c_str(), std::ofstream::out | std::ofstream::app);
+    ofs << "[QueryTimings]:" << std::endl;
+
+    double start, end;
+    std::cout << "<<<<<<<<<ALGO: PAGERANK>>>>>>>>>" << std::endl;
+    start = mywtime();
+    pvector<ScoreT> pr_ret = run_pr_numa(xpgraph, 20); //Change to run_pr_numa for numa
+    end = mywtime();
+    std::cout << "PageRank time = " << (end - start) << std::endl;
+    PrintTopPRScores(xpgraph, pr_ret);
+    ofs << "PageRank," << (end - start) << std::endl;
+
+    ofs.close();
+}
+
 void test_gapbs_bfs(XPGraph* xpgraph) {
     std::string statistic_filename = "xpgraph_query.csv";
     std::ofstream ofs;
