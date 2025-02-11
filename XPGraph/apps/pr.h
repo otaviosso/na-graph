@@ -7,7 +7,7 @@
 
 #include "gapbs/pvector.h"
 #include "gapbs/platform_atomics.h"
-
+#include <numa.h>
 #include <math.h>
 
 typedef float ScoreT;
@@ -79,14 +79,14 @@ void bind_thread_to_cpu(int cpu_id) {
 
 void bind_cpu_new(int tid) {
   int num_nodes = numa_num_configured_nodes();
-  int totalThreads = omp_get_max_threads()
+  int totalThreads = omp_get_max_threads();
   const int ncores_per_socket = totalThreads / num_nodes / 2; // Adjust based on your system
-  const int total_cores = cores_per_socket * 2; // 24 total cores per NUMA node
+  const int total_cores = ncores_per_socket * 2; // 24 total cores per NUMA node
   // Select socket by alternating: even tid → socket 0, odd tid → socket 1.
   int socket = tid % num_nodes;
   
   // Choose a core index within that socket.
-  int local_index = (tid / num_nodes) % cores_per_socket; 
+  int local_index = (tid / num_nodes) % ncores_per_socket; 
 
   // Compute the actual CPU ID based on your system's layout.
   int cpu_id;
@@ -102,10 +102,11 @@ void bind_cpu_new(int tid) {
     return;
   }
   bind_thread_to_cpu(cpu_id);
-
+/*
   // Debugging printout
   std::cout << "Thread " << tid << " bound to CPU " << cpu_id
             << " (socket " << socket << ", core " << local_index << ")" << std::endl;
+*/
 }
 
 pvector<ScoreT> run_pr_numa(XPGraph* snaph, int max_iters, double epsilon = 0) {
@@ -113,7 +114,7 @@ pvector<ScoreT> run_pr_numa(XPGraph* snaph, int max_iters, double epsilon = 0) {
   const ScoreT base_score = (1.0f - kDamp) / snaph->get_vcount();
   pvector<ScoreT> scores(snaph->get_vcount(), init_score);
   pvector<ScoreT> outgoing_contrib(snaph->get_vcount());
-
+  vid_t v_count = xpgraph->get_vcount();
   uint8_t NUM_SOCKETS = numa_num_configured_nodes();
   tid_t ncores_per_socket = omp_get_max_threads() / NUM_SOCKETS / 2; // Adjust based on your system
 
@@ -121,20 +122,9 @@ pvector<ScoreT> run_pr_numa(XPGraph* snaph, int max_iters, double epsilon = 0) {
       double error = 0;
 
       // First phase: Compute outgoing contributions
-      #pragma omp parallel
-      {
-          tid_t tid = omp_get_thread_num();
-          for (int id = 0; id < NUM_SOCKETS; ++id) {
-            bind_cpu_new(tid);
-
-            #pragma omp for schedule(static)
-            for (vid_t n = id; n < snaph->get_vcount(); n += NUM_SOCKETS) {
-                outgoing_contrib[n] = scores[n] / snaph->get_out_degree(n);
-            }
-
-            snaph->cancel_bind_cpu();
-          }
-      }
+      #pragma omp parallel for
+      for (vid_t n=0; n < v_count; n++)
+        outgoing_contrib[n] = scores[n] / snaph->get_out_degree(n);
 
       // Second phase: Update scores and compute error
       #pragma omp parallel reduction(+ : error)
@@ -143,8 +133,8 @@ pvector<ScoreT> run_pr_numa(XPGraph* snaph, int max_iters, double epsilon = 0) {
           for (int id = 0; id < NUM_SOCKETS; ++id) {
             bind_cpu_new(tid);
 
-            #pragma omp for schedule(dynamic, 64)
-            for (vid_t u = id; u < snaph->get_vcount(); u += NUM_SOCKETS) {
+            #pragma omp for schedule(dynamic, 4096) nowait
+            for (vid_t u = id; u < v_count; u += NUM_SOCKETS) {
                 ScoreT incoming_total = 0;
 
                 sid_t sid;
