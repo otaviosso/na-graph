@@ -408,6 +408,7 @@ public:
       bp->tree_height = tree_height;
 
       // allocate memory for vertices and edges in pmem-domain
+      // shouldn't the vertex array be volatile? - OTAVIO
       if (pmemobj_zalloc(pop, &bp->vertices_oid_, num_vertices * sizeof(struct vertex_element), VERTEX_TYPE)) {
         fprintf(stderr, "[%s]: FATAL: vertex array allocation failed: %s\n", __func__, pmemobj_errormsg());
         abort();
@@ -418,19 +419,10 @@ public:
         abort();
       }
 
+      // conteudo dos per-section edge logs - OTAVIO
       if (pmemobj_zalloc(pop, &bp->log_segment_oid_, segment_count * MAX_LOG_ENTRIES * sizeof(struct LogEntry),
                          SEG_LOG_PTR_TYPE)) {
         fprintf(stderr, "[%s]: FATAL: per-segment log array allocation failed: %s\n", __func__, pmemobj_errormsg());
-        abort();
-      }
-
-      if (pmemobj_zalloc(pop, &bp->ulog_oid_, num_threads * MAX_ULOG_ENTRIES * sizeof(DestID_), ULOG_PTR_TYPE)) {
-        fprintf(stderr, "[%s]: FATAL: u-log array allocation failed: %s\n", __func__, pmemobj_errormsg());
-        abort();
-      }
-
-      if (pmemobj_zalloc(pop, &bp->oplog_oid_, num_threads * sizeof(int64_t), OPLOG_PTR_TYPE)) {
-        fprintf(stderr, "[%s]: FATAL: op-log array allocation failed: %s\n", __func__, pmemobj_errormsg());
         abort();
       }
 
@@ -439,6 +431,18 @@ public:
         abort();
       }
 
+      if (pmemobj_zalloc(pop, &bp->ulog_oid_, num_threads * MAX_ULOG_ENTRIES * sizeof(DestID_), ULOG_PTR_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: u-log array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+
+      // ??? - OTAVIO
+      if (pmemobj_zalloc(pop, &bp->oplog_oid_, num_threads * sizeof(int64_t), OPLOG_PTR_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: op-log array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+
+      // por que diabos ele está alocando duas vezes a mesma coisa??? - OTAVIO
       if (pmemobj_zalloc(pop, &bp->segment_edges_actual_oid_, sizeof(int64_t) * segment_count * 2,
                          PMA_TREE_META_TYPE)) {
         fprintf(stderr, "[%s]: FATAL: pma metadata allocation failed: %s\n", __func__, pmemobj_errormsg());
@@ -484,7 +488,7 @@ public:
       /// insert base-graph edges
       Timer t;
       t.Start();
-      insert(edge_list);
+      insert(edge_list); // return later - OTAVIO
       t.Stop();
       cout << "base graph insert time: " << t.Seconds() << endl;
 
@@ -540,7 +544,7 @@ public:
       } else {
         Timer t;
         t.Start();
-        recovery();
+        recovery(); // return later - OTAVIO
         t.Stop();
         cout << "graph recovery time: " << t.Seconds() << endl;
 
