@@ -18,7 +18,7 @@ ifneq ($(SERIAL), 1)
 	CXX_FLAGS += $(PAR_FLAG)
 endif
 
-KERNELS = bc bfs cc_sv pr
+KERNELS = bc bfs cc_sv pr insert
 # COMMON = benchmark.h reader.h writer.h bitmap.h sliding_queue.h builder.h platform_atomics.h timer.h command_line.h pvector.h util.h 
 SUITE = $(KERNELS)
 

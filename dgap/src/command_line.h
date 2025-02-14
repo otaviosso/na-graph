@@ -257,30 +257,27 @@ class CLConvert : public CLBase {
 
 /*
  ********** INSERTION BENCHMARK **********
-*/
+ */
 
 class CLInsert : public CLApp {
-  int max_iters_;
+  int iters_; // iterations
 
  public:
-  CLInsert(int argc, char** argv, std::string name, int max_iters) :
-    CLApp(argc, argv, name), max_iters_(max_iters), tolerance_(tolerance) {
-    get_args_ += "i:t:";
-    AddHelpLine('i', "i", "perform at most i iterations",
-                std::to_string(max_iters_));
-    AddHelpLine('t', "t", "use tolerance t", std::to_string(tolerance_));
-  }
+  CLInsert(int argc, char** argv, std::string name, int iters) :
+    CLApp(argc, argv, name), iters_(iters) {
+    get_args_ += "i:";
+    AddHelpLine('i', "i", "perform i iterations",
+                std::to_string(iters_));
+    }
 
   void HandleArg(signed char opt, char* opt_arg) override {
     switch (opt) {
-      case 'i': max_iters_ = atoi(opt_arg);            break;
-      case 't': tolerance_ = std::stod(opt_arg);            break;
+      case 'i': iters_ = atoi(opt_arg);            break;
       default: CLApp::HandleArg(opt, opt_arg);
     }
   }
 
-  int max_iters() const { return max_iters_; }
-  double tolerance() const { return tolerance_; }
+  int iters() const { return iters_; }
 };
 
 #endif  // COMMAND_LINE_H_
