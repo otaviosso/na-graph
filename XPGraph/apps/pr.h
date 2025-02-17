@@ -122,7 +122,7 @@ pvector<ScoreT> run_pr_numa(XPGraph* snaph, int max_iters, double epsilon = 0) {
   const ScoreT base_score = (1.0f - kDamp) / snaph->get_vcount();
   pvector<ScoreT> scores(snaph->get_vcount(), init_score);
   pvector<ScoreT> outgoing_contrib(snaph->get_vcount());
-  vid_t v_count = xpgraph->get_vcount();
+  vid_t v_count = snaph->get_vcount();
   uint8_t NUM_SOCKETS = numa_num_configured_nodes();
   tid_t ncores_per_socket = omp_get_max_threads() / NUM_SOCKETS / 2; // Adjust based on your system
 
