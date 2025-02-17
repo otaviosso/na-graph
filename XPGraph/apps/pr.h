@@ -94,17 +94,17 @@ void bind_cpu_new(int tid) {
   int socket = cpu_id%num_nodes;
   //Just working for 2 sockets...
   if(socket==0){
-    if(tid>nthreads_per_socket){
-      bind_thread_to_cpu(tid-(socket+1)*nthreads_per_socket)}
+    if(tid>ncores_per_socket){
+      bind_thread_to_cpu(tid-(socket+1)*ncores_per_socket);}
     else{
-      bind_thread_to_cpu(tid)}
+      bind_thread_to_cpu(tid);}
 
   }  
   else{
       if(cpu_id>num_nodes){
-        bind_thread_to_cpu(tid)}
+        bind_thread_to_cpu(tid);}
       else{
-        bind_thread_to_cpu(tid+socket*nthreads_per_socket)}
+        bind_thread_to_cpu(tid+socket*ncores_per_socket);}
     }
 
   
