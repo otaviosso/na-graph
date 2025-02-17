@@ -83,31 +83,39 @@ void bind_cpu_new(int tid) {
   const int ncores_per_socket = totalThreads / num_nodes / 2; // Adjust based on your system
   const int total_cores = ncores_per_socket * 2; // 24 total cores per NUMA node
   // Select socket by alternating: even tid → socket 0, odd tid → socket 1.
-  int socket = tid % num_nodes;
-  
-  // Choose a core index within that socket.
-  int local_index = (tid / num_nodes) % ncores_per_socket; 
 
   // Compute the actual CPU ID based on your system's layout.
-  int cpu_id;
-  if (socket == 0) {
-      cpu_id = (local_index < ncores_per_socket) ? local_index : (local_index + ncores_per_socket);
-  } else {
-      cpu_id = (local_index < ncores_per_socket) ? (local_index + ncores_per_socket) : (local_index + (num_nodes * ncores_per_socket));
-  }
-
-  // Bind the thread to the chosen CPU.
-  if(cpu_id>totalThreads){
-    printf("Too many works\n");
+  if(tid>totalThreads){
+    printf("Too many threads\n");
     return;
   }
-  bind_thread_to_cpu(cpu_id);
+
+  int cpu_id=tid/ncores_per_socket;
+  int socket = cpu_id%num_nodes;
+  //Just working for 2 sockets...
+  if(socket==0){
+    if(tid>nthreads_per_socket){
+      bind_thread_to_cpu(tid-(socket+1)*nthreads_per_socket)}
+    else{
+      bind_thread_to_cpu(tid)}
+
+  }  
+  else{
+      if(cpu_id>num_nodes){
+        bind_thread_to_cpu(tid)}
+      else{
+        bind_thread_to_cpu(tid+socket*nthreads_per_socket)}
+    }
+
+  
+  
 /*
   // Debugging printout
   std::cout << "Thread " << tid << " bound to CPU " << cpu_id
             << " (socket " << socket << ", core " << local_index << ")" << std::endl;
 */
 }
+
 
 pvector<ScoreT> run_pr_numa(XPGraph* snaph, int max_iters, double epsilon = 0) {
   const ScoreT init_score = 1.0f / snaph->get_vcount();
