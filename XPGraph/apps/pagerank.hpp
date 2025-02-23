@@ -349,6 +349,7 @@ void test_pagerank_pull_numa(XPGraph* xpgraph, int iteration_count){
                 // if(tid >= 24 && tid < 48 || (tid >= 72 && tid < 96)){ // socket1
                 if((tid >= ncores_per_socket*id && tid < ncores_per_socket*(id+1)) 
                 || (tid >= ncores_per_socket*NUM_SOCKETS + ncores_per_socket*id && tid < ncores_per_socket*NUM_SOCKETS + ncores_per_socket*(id+1))){
+                    //printf("TID: %d, ID:%d\n");
                     // bind_thread_to_socket(tid, id);
                     xpgraph->bind_cpu_edit(tid, id);
                     
