@@ -481,11 +481,11 @@ public:
     
     //One for each NUMA node
     base_oid0 = pmemobj_root(pop0, sizeof(struct Base));
-    bp0 = (struct Base *) pmemobj_direct(base_oid);
+    bp0 = (struct Base *) pmemobj_direct(base_oid0);
     check_sanity(bp0);
 
     base_oid1 = pmemobj_root(pop1, sizeof(struct Base));
-    bp1 = (struct Base *) pmemobj_direct(base_oid);
+    bp1 = (struct Base *) pmemobj_direct(base_oid1);
     check_sanity(bp1);
 
     // newly created files
@@ -577,7 +577,7 @@ public:
 
 
 
-      if (pmemobj_zalloc(pop, &bp0->ulog_oid_, num_threads * MAX_ULOG_ENTRIES * sizeof(DestID_), ULOG_PTR_TYPE)) {
+      if (pmemobj_zalloc(pop0, &bp0->ulog_oid_, num_threads * MAX_ULOG_ENTRIES * sizeof(DestID_), ULOG_PTR_TYPE)) {
         fprintf(stderr, "[%s]: FATAL: u-log array allocation failed: %s\n", __func__, pmemobj_errormsg());
         abort();
       }
@@ -634,11 +634,11 @@ public:
       struct vertex_element *vertices_0;
       struct vertex_element *vertices_1;
 
-      vertices_0 = (struct vertex_element *) malloc(num_vertices_0 * sizeof(struct vertex_element));
-      memcpy(vertices_0, (struct vertex_element *) pmemobj_direct(bp0->vertices_oid_), num_vertices_0 * sizeof(struct vertex_element));
+      vertices_0 = (struct vertex_element *) malloc(n_vertices_node0 * sizeof(struct vertex_element));
+      memcpy(vertices_0, (struct vertex_element *) pmemobj_direct(bp0->vertices_oid_), n_vertices_node0 * sizeof(struct vertex_element));
 
-      vertices_1 = (struct vertex_element *) malloc(num_vertices_1 * sizeof(struct vertex_element));
-      memcpy(vertices_1, (struct vertex_element *) pmemobj_direct(bp1->vertices_oid_), num_vertices_1 * sizeof(struct vertex_element));
+      vertices_1 = (struct vertex_element *) malloc(n_vertices_node1 * sizeof(struct vertex_element));
+      memcpy(vertices_1, (struct vertex_element *) pmemobj_direct(bp1->vertices_oid_), n_vertices_node1 * sizeof(struct vertex_element));
 
       struct LogEntry *log_base_ptr_0;
       struct LogEntry *log_base_ptr_1;
@@ -652,18 +652,18 @@ public:
       DestID_ **ulog_ptr_1;
 
       log_base_ptr_0 = (struct LogEntry *) pmemobj_direct(bp0->log_segment_oid_);
-      log_ptr_0 = (struct LogEntry **) malloc(segment_count_0 * sizeof(struct LogEntry *));
-      for (int sid = 0; sid < segment_count_0; sid++) {
+      log_ptr_0 = (struct LogEntry **) malloc(segment_count0 * sizeof(struct LogEntry *));
+      for (int sid = 0; sid < segment_count0; sid++) {
         log_ptr_0[sid] = log_base_ptr_0 + (sid * MAX_LOG_ENTRIES);
       }
-      log_segment_idx_0 = (int32_t *) calloc(segment_count_0, sizeof(int32_t));
+      log_segment_idx_0 = (int32_t *) calloc(segment_count0, sizeof(int32_t));
 
       log_base_ptr_1 = (struct LogEntry *) pmemobj_direct(bp1->log_segment_oid_);
-      log_ptr_1 = (struct LogEntry **) malloc(segment_count_1 * sizeof(struct LogEntry *));
-      for (int sid = 0; sid < segment_count_1; sid++) {
+      log_ptr_1 = (struct LogEntry **) malloc(segment_count1 * sizeof(struct LogEntry *));
+      for (int sid = 0; sid < segment_count1; sid++) {
         log_ptr_1[sid] = log_base_ptr_1 + (sid * MAX_LOG_ENTRIES);
       }
-      log_segment_idx_1 = (int32_t *) calloc(segment_count_1, sizeof(int32_t));
+      log_segment_idx_1 = (int32_t *) calloc(segment_count1, sizeof(int32_t));
 
       ulog_base_ptr_0 = (DestID_ *) pmemobj_direct(bp0->ulog_oid_);
       ulog_ptr_0 = (DestID_ **) malloc((num_threads/2) * sizeof(DestID_ *));
@@ -673,16 +673,16 @@ public:
 
       // Para o nó NUMA 0:
       ulog_base_ptr_0 = (DestID_ *) pmemobj_direct(bp0->ulog_oid_);
-      ulog_ptr_0 = (DestID_ **) malloc(num_threads_0 * sizeof(DestID_ *));
-      for (int tid = 0; tid < num_threads_0; tid++) {
+      ulog_ptr_0 = (DestID_ **) malloc((num_threads/2) * sizeof(DestID_ *));
+      for (int tid = 0; tid < (num_threads/2); tid++) {
           ulog_ptr_0[tid] = ulog_base_ptr_0 + (tid * MAX_ULOG_ENTRIES);
       }
       oplog_ptr_0 = (int64_t *) pmemobj_direct(bp0->oplog_oid_);
 
       // Para o nó NUMA 1:
       ulog_base_ptr_1 = (DestID_ *) pmemobj_direct(bp1->ulog_oid_);
-      ulog_ptr_1 = (DestID_ **) malloc(num_threads_1 * sizeof(DestID_ *));
-      for (int tid = 0; tid < num_threads_1; tid++) {
+      ulog_ptr_1 = (DestID_ **) malloc((num_threads/2) * sizeof(DestID_ *));
+      for (int tid = 0; tid < (num_threads/2); tid++) {
           ulog_ptr_1[tid] = ulog_base_ptr_1 + (tid * MAX_ULOG_ENTRIES);
       }     
       oplog_ptr_1 = (int64_t *) pmemobj_direct(bp1->oplog_oid_);
@@ -702,7 +702,7 @@ public:
       flush_clwb_nolog(&bp0->backed_up_, sizeof(bool));
       flush_clwb_nolog(&bp1->backed_up_, sizeof(bool));
       //até aki
-    } else {
+    } /*else {
       Timer t_reboot;
       t_reboot.Start();
 
@@ -763,7 +763,7 @@ public:
 
       t_reboot.Stop();
       cout << "graph reboot time: " << t_reboot.Seconds() << endl;
-    }
+    }*/
   }
   #else
   CSRGraph(const char *file, const EdgeList &edge_list, bool is_directed, int64_t n_edges, int64_t n_vertices) {
@@ -1991,6 +1991,10 @@ private:
   DestID_ *ulog_base_ptr_;                // base pointer of the undo-log; used to track the group allocation of undo-logs
   DestID_ **ulog_ptr_;                    // array of undo-log pointers (array size is number of write threads)
   int64_t *oplog_ptr_;                    // keeps the start index in the edge array that is backed up in undo-log
+  #ifdef NUMA_PMEM
+  int64_t *oplog_ptr_0;
+  int64_t *oplog_ptr_1;
+  #endif
 };
 
 #endif  // GRAPH_H_
