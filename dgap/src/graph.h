@@ -146,7 +146,14 @@ struct Base {
   /* General graph fields */
   int64_t num_vertices;   // Number of vertices
   int64_t num_edges_;     // Number of edges
-
+  #ifdef NUMA_PMEM
+  int64_t n_vertices_node0;
+  int64_t n_vertices_node1;
+  int64_t n_edges_node0;     // Partição igual para as arestas
+  int64_t n_edges_node1;
+  int64_t segment_count0;
+  int64_t segment_count1;
+  #endif
   /* General PMA fields */
   int64_t elem_capacity; // size of the edges_ array
   int64_t segment_count; // number of pma leaf segments
@@ -312,10 +319,89 @@ class CSRGraph {
 
 
 public:
+  #ifdef NUMA_PMEM
+  PMEMobjpool *pop0;
+  PMEMobjpool *pop1;
+  PMEMoid base_oid0;
+  PMEMoid base_oid1;
+  struct Base *bp0;
+  struct Base *bp1;
+  #else
   PMEMobjpool *pop;
   PMEMoid base_oid;
   struct Base *bp;
+  #endif
 
+  #ifdef NUMA_PMEM
+  
+  ~CSRGraph() {
+    memcpy((struct vertex_element *) pmemobj_direct(bp0->vertices_oid_), vertices_,
+    n_vertices_node0 * sizeof(struct vertex_element));
+    memcpy((struct vertex_element *) pmemobj_direct(bp1->vertices_oid_), vertices_,
+    n_vertices_node1 * sizeof(struct vertex_element));
+    flush_clwb_nolog((struct vertex_element *) pmemobj_direct(bp0->vertices_oid_),
+    n_vertices_node0 * sizeof(struct vertex_element));
+    flush_clwb_nolog((struct vertex_element *) pmemobj_direct(bp1->vertices_oid_),
+    n_vertices_node1 * sizeof(struct vertex_element));                
+
+    memcpy((int32_t *) pmemobj_direct(bp0->log_segment_idx_oid_), log_segment_idx_, segment_count0 * sizeof(int32_t));
+    memcpy((int32_t *) pmemobj_direct(bp1->log_segment_idx_oid_), log_segment_idx_, segment_count1 * sizeof(int32_t));
+    flush_clwb_nolog((int32_t *) pmemobj_direct(bp0->log_segment_idx_oid_), segment_count0 * sizeof(int32_t));
+    flush_clwb_nolog((int32_t *) pmemobj_direct(bp1->log_segment_idx_oid_), segment_count1 * sizeof(int32_t));
+    
+    memcpy((int64_t *) pmemobj_direct(bp0->segment_edges_actual_oid_), segment_edges_actual,
+           sizeof(int64_t) * segment_count * 2);
+    memcpy((int64_t *) pmemobj_direct(bp1->segment_edges_actual_oid_), segment_edges_actual,
+           sizeof(int64_t) * segment_count * 2);
+    flush_clwb_nolog((int64_t *) pmemobj_direct(bp0->segment_edges_actual_oid_), sizeof(int64_t) * segment_count * 2);
+    flush_clwb_nolog((int64_t *) pmemobj_direct(bp1->segment_edges_actual_oid_), sizeof(int64_t) * segment_count * 2);
+
+    memcpy((int64_t *) pmemobj_direct(bp0->segment_edges_total_oid_), segment_edges_total,
+           sizeof(int64_t) * segment_count * 2);
+    memcpy((int64_t *) pmemobj_direct(bp1->segment_edges_total_oid_), segment_edges_total,
+           sizeof(int64_t) * segment_count * 2);
+    flush_clwb_nolog((int64_t *) pmemobj_direct(bp0->segment_edges_total_oid_), sizeof(int64_t) * segment_count * 2);
+    flush_clwb_nolog((int64_t *) pmemobj_direct(bp1->segment_edges_total_oid_), sizeof(int64_t) * segment_count * 2);
+    
+    bp0->num_vertices = n_vertices_node0;  // Number of vertices
+    flush_clwb_nolog(&bp0->num_vertices, sizeof(int64_t));
+    bp1->num_vertices = n_vertices_node1;  // Number of vertices
+    flush_clwb_nolog(&bp1->num_vertices, sizeof(int64_t));
+
+    bp0->num_edges_ = n_edges_node0;  // Number of edges
+    flush_clwb_nolog(&bp0->num_edges_, sizeof(int64_t));
+    bp1->num_edges_ = n_edges_node1;  // Number of edges
+    flush_clwb_nolog(&bp1->num_edges_, sizeof(int64_t));
+
+    bp0->elem_capacity = elem_capacity;
+    flush_clwb_nolog(&bp0->elem_capacity, sizeof(int64_t));
+    bp1->elem_capacity = elem_capacity;
+    flush_clwb_nolog(&bp1->elem_capacity, sizeof(int64_t));
+
+    bp0->segment_count = segment_count0;
+    flush_clwb_nolog(&bp0->segment_count, sizeof(int64_t));
+    bp1->segment_count = segment_count1;
+    flush_clwb_nolog(&bp1->segment_count, sizeof(int64_t));
+
+    bp0->segment_size = segment_size;
+    flush_clwb_nolog(&bp0->segment_size, sizeof(int64_t));
+    bp1->segment_size = segment_size;
+    flush_clwb_nolog(&bp1->segment_size, sizeof(int64_t));
+
+    bp0->tree_height = tree_height;
+    flush_clwb_nolog(&bp0->tree_height, sizeof(int64_t));
+    bp1->tree_height = tree_height;
+    flush_clwb_nolog(&bp1->tree_height, sizeof(int64_t));
+
+    // write flag indicating data has been backed up properly before shutting down
+    bp0->backed_up_ = true;
+    flush_clwb_nolog(&bp0->backed_up_, sizeof(bool));
+    bp1->backed_up_ = true;
+    flush_clwb_nolog(&bp1->backed_up_, sizeof(bool));
+
+    ReleaseResources();
+  }
+  #else
   ~CSRGraph() {
     memcpy((struct vertex_element *) pmemobj_direct(bp->vertices_oid_), vertices_,
            num_vertices * sizeof(struct vertex_element));
@@ -357,7 +443,337 @@ public:
 
     ReleaseResources();
   }
+  #endif
+  #ifdef NUMA_PMEM
+  CSRGraph(const char *file0, const char *file1, const EdgeList &edge_list, bool is_directed, int64_t n_edges, int64_t n_vertices) {
+    
+    bool is_new = false;
+    num_threads = omp_get_max_threads(); //Talvez dividir por 2?
 
+    /* file1 already exists */
+    if((file_exists(file0)!= 0) || (file_exists(file1)!= 0)){ 
+        //If one of the files does not exist, it delete the other and create new ones.
+        if (file_exists(file0) == 0) {
+            delete_file(file0);
+        }
+        if (file_exists(file1) == 0) {
+            delete_file(file1);
+        is_new = true;
+        }
+    }
+    if (file_exists(file0) == 0) {
+      if ((pop0 = pmemobj_open(file0, LAYOUT_NAME)) == NULL) {
+        fprintf(stderr, "[%s]: FATAL: pmemobj_open error: %s\n", __FUNCTION__, pmemobj_errormsg());
+        exit(0);
+      }
+    } else {
+      if ((pop0 = pmemobj_create(file0, LAYOUT_NAME, DB_POOL_SIZE, CREATE_MODE_RW)) == NULL) {
+        fprintf(stderr, "[%s]: FATAL: pmemobj_create error: %s\n", __FUNCTION__, pmemobj_errormsg());
+        exit(0);
+      }
+      is_new = true;
+    }
+
+    if (file_exists(file1) == 0) {
+        if ((pop1 = pmemobj_open(file1, LAYOUT_NAME)) == NULL) {
+          fprintf(stderr, "[%s]: FATAL: pmemobj_open error: %s\n", __FUNCTION__, pmemobj_errormsg());
+          exit(0);
+        }
+      } else {
+        if ((pop1 = pmemobj_create(file1, LAYOUT_NAME, DB_POOL_SIZE, CREATE_MODE_RW)) == NULL) {
+          fprintf(stderr, "[%s]: FATAL: pmemobj_create error: %s\n", __FUNCTION__, pmemobj_errormsg());
+          exit(0);
+        }
+        is_new = true;
+    }
+    
+    //One for each NUMA node
+    base_oid0 = pmemobj_root(pop0, sizeof(struct Base));
+    bp0 = (struct Base *) pmemobj_direct(base_oid);
+    check_sanity(bp0);
+
+    base_oid1 = pmemobj_root(pop1, sizeof(struct Base));
+    bp1 = (struct Base *) pmemobj_direct(base_oid);
+    check_sanity(bp1);
+
+    // newly created files
+    if (is_new) {
+      // ds initialization (for dram-domain)
+      num_edges_ = n_edges;
+      num_vertices = n_vertices;
+      max_valid_vertex_id = n_vertices;
+      directed_ = is_directed;
+      n_vertices_node0 = n_vertices / 2;
+      n_vertices_node1 = n_vertices - n_vertices_node0;
+      n_edges_node0 = n_edges / 2;     // Exemplo: partição igual para as aresta
+      n_edges_node1 = n_edges - n_edges_node0;
+      compute_capacity();
+      segment_count0 = segment_count /2; //Depois do compute_capacity
+      segment_count1 = segment_count - segment_count0;
+
+      // array-based compete tree structure
+      segment_edges_actual = (int64_t *) calloc(segment_count * 2, sizeof(int64_t));
+      segment_edges_total = (int64_t *) calloc(segment_count * 2, sizeof(int64_t));
+
+      tree_height = floor_log2(segment_count);
+      delta_up = (up_0 - up_h) / tree_height;
+      delta_low = (low_h - low_0) / tree_height;
+
+      // ds initialization (for pmem-domain)
+      bp0->pool_uuid_lo = base_oid0.pool_uuid_lo;
+      bp0->num_vertices = n_vertices_node0;
+      bp0->num_edges_ = n_edges_node0;
+      bp0->directed_ = directed_;
+      bp0->elem_capacity = elem_capacity;
+      bp0->segment_count = segment_count0;
+      bp0->segment_size = segment_size;
+      bp0->tree_height = tree_height;
+
+      bp1->pool_uuid_lo = base_oid1.pool_uuid_lo;
+      bp1->num_vertices = n_vertices_node1;
+      bp1->num_edges_ = n_edges_node1;
+      bp1->directed_ = directed_;
+      bp1->elem_capacity = elem_capacity;
+      bp1->segment_count = segment_count1;
+      bp1->segment_size = segment_size;
+      bp1->tree_height = tree_height;
+      // allocate memory for vertices and edges in pmem-domain
+      // shouldn't the vertex array be volatile? - OTAVIO
+      if (pmemobj_zalloc(pop0, &bp0->vertices_oid_, n_vertices_node0 * sizeof(struct vertex_element), VERTEX_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: vertex array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+      if (pmemobj_zalloc(pop1, &bp1->vertices_oid_, n_vertices_node1 * sizeof(struct vertex_element), VERTEX_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: vertex array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+
+      if (pmemobj_zalloc(pop0, &bp0->edges_oid_, elem_capacity * sizeof(DestID_), EDGE_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: edge array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+      if (pmemobj_zalloc(pop1, &bp1->edges_oid_, elem_capacity * sizeof(DestID_), EDGE_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: edge array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+
+      // conteudo dos per-section edge logs - OTAVIO
+      if (pmemobj_zalloc(pop0, &bp0->log_segment_oid_, segment_count0 * MAX_LOG_ENTRIES * sizeof(struct LogEntry),
+                         SEG_LOG_PTR_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: per-segment log array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+      
+      if (pmemobj_zalloc(pop1, &bp1->log_segment_oid_, segment_count1 * MAX_LOG_ENTRIES * sizeof(struct LogEntry),
+                         SEG_LOG_PTR_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: per-segment log array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+
+      if (pmemobj_zalloc(pop0, &bp0->log_segment_idx_oid_, segment_count0 * sizeof(int32_t), SEG_LOG_IDX_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: per-segment log index allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+      
+
+      if (pmemobj_zalloc(pop1, &bp1->log_segment_idx_oid_, segment_count0 * sizeof(int32_t), SEG_LOG_IDX_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: per-segment log index allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+
+
+
+
+
+      if (pmemobj_zalloc(pop, &bp0->ulog_oid_, num_threads * MAX_ULOG_ENTRIES * sizeof(DestID_), ULOG_PTR_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: u-log array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+
+      if (pmemobj_zalloc(pop1, &bp1->ulog_oid_, num_threads * MAX_ULOG_ENTRIES * sizeof(DestID_), ULOG_PTR_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: u-log array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+
+      // ??? - OTAVIO
+      if (pmemobj_zalloc(pop0, &bp0->oplog_oid_, num_threads * sizeof(int64_t), OPLOG_PTR_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: op-log array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+      if (pmemobj_zalloc(pop1, &bp1->oplog_oid_, num_threads * sizeof(int64_t), OPLOG_PTR_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: op-log array allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+
+
+
+      // por que diabos ele está alocando duas vezes a mesma coisa??? - OTAVIO
+      if (pmemobj_zalloc(pop0, &bp0->segment_edges_actual_oid_, sizeof(int64_t) * segment_count0 * 2,
+                         PMA_TREE_META_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: pma metadata allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+      if (pmemobj_zalloc(pop1, &bp1->segment_edges_actual_oid_, sizeof(int64_t) * segment_count1 * 2,
+            PMA_TREE_META_TYPE)) {
+      fprintf(stderr, "[%s]: FATAL: pma metadata allocation failed: %s\n", __func__, pmemobj_errormsg());
+      abort();
+      }
+
+      if (pmemobj_zalloc(pop0, &bp0->segment_edges_total_oid_, sizeof(int64_t) * segment_count0 * 2, PMA_TREE_META_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: pma metadata allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+      if (pmemobj_zalloc(pop1, &bp1->segment_edges_total_oid_, sizeof(int64_t) * segment_count1 * 2, PMA_TREE_META_TYPE)) {
+        fprintf(stderr, "[%s]: FATAL: pma metadata allocation failed: %s\n", __func__, pmemobj_errormsg());
+        abort();
+      }
+
+      flush_clwb_nolog(bp0, sizeof(struct Base));
+      flush_clwb_nolog(bp1, sizeof(struct Base));
+      // retrieving pmem-pointer from pmem-oid (for pmem domain)
+
+      //Como dividir em dois
+      //edges_ = (DestID_ *) pmemobj_direct(bp->edges_oid_);
+      DestID_ *edges_0;
+      DestID_ *edges_1;
+      edges_0 = (DestID_ *) pmemobj_direct(bp0->edges_oid_);
+      edges_1 = (DestID_ *) pmemobj_direct(bp1->edges_oid_);
+
+      struct vertex_element *vertices_0;
+      struct vertex_element *vertices_1;
+
+      vertices_0 = (struct vertex_element *) malloc(num_vertices_0 * sizeof(struct vertex_element));
+      memcpy(vertices_0, (struct vertex_element *) pmemobj_direct(bp0->vertices_oid_), num_vertices_0 * sizeof(struct vertex_element));
+
+      vertices_1 = (struct vertex_element *) malloc(num_vertices_1 * sizeof(struct vertex_element));
+      memcpy(vertices_1, (struct vertex_element *) pmemobj_direct(bp1->vertices_oid_), num_vertices_1 * sizeof(struct vertex_element));
+
+      struct LogEntry *log_base_ptr_0;
+      struct LogEntry *log_base_ptr_1;
+      struct LogEntry **log_ptr_0;
+      struct LogEntry **log_ptr_1;
+      int32_t *log_segment_idx_0;
+      int32_t *log_segment_idx_1;
+      DestID_ *ulog_base_ptr_0;
+      DestID_ *ulog_base_ptr_1;
+      DestID_ **ulog_ptr_0;
+      DestID_ **ulog_ptr_1;
+
+      log_base_ptr_0 = (struct LogEntry *) pmemobj_direct(bp0->log_segment_oid_);
+      log_ptr_0 = (struct LogEntry **) malloc(segment_count_0 * sizeof(struct LogEntry *));
+      for (int sid = 0; sid < segment_count_0; sid++) {
+        log_ptr_0[sid] = log_base_ptr_0 + (sid * MAX_LOG_ENTRIES);
+      }
+      log_segment_idx_0 = (int32_t *) calloc(segment_count_0, sizeof(int32_t));
+
+      log_base_ptr_1 = (struct LogEntry *) pmemobj_direct(bp1->log_segment_oid_);
+      log_ptr_1 = (struct LogEntry **) malloc(segment_count_1 * sizeof(struct LogEntry *));
+      for (int sid = 0; sid < segment_count_1; sid++) {
+        log_ptr_1[sid] = log_base_ptr_1 + (sid * MAX_LOG_ENTRIES);
+      }
+      log_segment_idx_1 = (int32_t *) calloc(segment_count_1, sizeof(int32_t));
+
+      ulog_base_ptr_0 = (DestID_ *) pmemobj_direct(bp0->ulog_oid_);
+      ulog_ptr_0 = (DestID_ **) malloc((num_threads/2) * sizeof(DestID_ *));
+
+      ulog_base_ptr_1 = (DestID_ *) pmemobj_direct(bp1->ulog_oid_);
+      ulog_ptr_1 = (DestID_ **) malloc((num_threads/2) * sizeof(DestID_ *));
+
+      // Para o nó NUMA 0:
+      ulog_base_ptr_0 = (DestID_ *) pmemobj_direct(bp0->ulog_oid_);
+      ulog_ptr_0 = (DestID_ **) malloc(num_threads_0 * sizeof(DestID_ *));
+      for (int tid = 0; tid < num_threads_0; tid++) {
+          ulog_ptr_0[tid] = ulog_base_ptr_0 + (tid * MAX_ULOG_ENTRIES);
+      }
+      oplog_ptr_0 = (int64_t *) pmemobj_direct(bp0->oplog_oid_);
+
+      // Para o nó NUMA 1:
+      ulog_base_ptr_1 = (DestID_ *) pmemobj_direct(bp1->ulog_oid_);
+      ulog_ptr_1 = (DestID_ **) malloc(num_threads_1 * sizeof(DestID_ *));
+      for (int tid = 0; tid < num_threads_1; tid++) {
+          ulog_ptr_1[tid] = ulog_base_ptr_1 + (tid * MAX_ULOG_ENTRIES);
+      }     
+      oplog_ptr_1 = (int64_t *) pmemobj_direct(bp1->oplog_oid_);
+
+
+      // leaf segment concurrency primitives
+      leaf_segments = new PMALeafSegment[segment_count];
+      /// insert base-graph edges
+      Timer t;
+      t.Start();
+      insert(edge_list); // return later - OTAVIO
+      t.Stop();
+      cout << "base graph insert time: " << t.Seconds() << endl;
+
+      bp0->backed_up_ = false;
+      bp1->backed_up_ = false;
+      flush_clwb_nolog(&bp0->backed_up_, sizeof(bool));
+      flush_clwb_nolog(&bp1->backed_up_, sizeof(bool));
+      //até aki
+    } else {
+      Timer t_reboot;
+      t_reboot.Start();
+
+      cout << "how was last backup? Good? " << bp->backed_up_ << endl;
+
+      /// ds initialization (for dram-domain)
+      elem_capacity = bp->elem_capacity;
+      segment_count = bp->segment_count;
+      segment_size = bp->segment_size;
+      tree_height = bp->tree_height;
+
+      num_vertices = bp->num_vertices;
+      num_edges_ = bp->num_edges_;
+      avg_degree = ceil_div(num_edges_, num_vertices);
+      directed_ = bp->directed_;
+
+      // array-based compete tree structure
+      segment_edges_actual = (int64_t *) calloc(segment_count * 2, sizeof(int64_t));
+      segment_edges_total = (int64_t *) calloc(segment_count * 2, sizeof(int64_t));
+
+      delta_up = (up_0 - up_h) / tree_height;
+      delta_low = (low_h - low_0) / tree_height;
+
+      // retrieving pmem-pointer from pmem-oid (for pmem domain)
+      edges_ = (DestID_ *) pmemobj_direct(bp->edges_oid_);
+      vertices_ = (struct vertex_element *) malloc(num_vertices * sizeof(struct vertex_element));
+
+      log_base_ptr_ = (struct LogEntry *) pmemobj_direct(bp->log_segment_oid_);
+      log_ptr_ = (struct LogEntry **) malloc(segment_count * sizeof(struct LogEntry *));  // 8-byte
+      log_segment_idx_ = (int32_t *) malloc(segment_count * sizeof(int32_t)); // 4-byte
+
+      for (int sid = 0; sid < segment_count; sid += 1) {
+        // save pointer in the log_ptr_[sid]
+        log_ptr_[sid] = (struct LogEntry *) (log_base_ptr_ + (sid * MAX_LOG_ENTRIES));
+      }
+
+      // last shutdown was properly backed up
+      if (bp->backed_up_) {
+        memcpy(vertices_, (struct vertex_element *) pmemobj_direct(bp->vertices_oid_),
+               num_vertices * sizeof(struct vertex_element));
+        memcpy(log_segment_idx_, (int32_t *) pmemobj_direct(bp->log_segment_idx_oid_),
+               segment_count * sizeof(int32_t));  // 4-byte
+        memcpy(segment_edges_actual, (int64_t *) pmemobj_direct(bp->segment_edges_actual_oid_),
+               sizeof(int64_t) * segment_count * 2); // 8-byte
+        memcpy(segment_edges_total, (int64_t *) pmemobj_direct(bp->segment_edges_total_oid_),
+               sizeof(int64_t) * segment_count * 2); // 8-byte
+      } else {
+        Timer t;
+        t.Start();
+        recovery(); // return later - OTAVIO
+        t.Stop();
+        cout << "graph recovery time: " << t.Seconds() << endl;
+
+        // persisting number of edges
+        bp->num_edges_ = num_edges_;
+        flush_clwb_nolog(&bp->num_edges_, sizeof(int64_t));
+      }
+
+      t_reboot.Stop();
+      cout << "graph reboot time: " << t_reboot.Seconds() << endl;
+    }
+  }
+  #else
   CSRGraph(const char *file, const EdgeList &edge_list, bool is_directed, int64_t n_edges, int64_t n_vertices) {
     bool is_new = false;
     num_threads = omp_get_max_threads();
@@ -557,6 +973,7 @@ public:
       cout << "graph reboot time: " << t_reboot.Seconds() << endl;
     }
   }
+  #endif
 
   void recovery() {
     /// rebuild vertices_ by scanning edges_
@@ -891,7 +1308,111 @@ public:
       segment_edges_total[j] = segment_total_p;
     }
   }
-
+  #ifdef NUMA_PMEM
+  void insert(const EdgeList &edge_list) {
+    // Variáveis de controle para cada partição
+    NodeID_ last_vid0 = -1, last_vid1 = -1;
+    int64_t ii0 = 0, ii1 = 0;
+  
+    // Itera por todas as arestas do edge_list
+    for (int i = 0; i < num_edges_; i++) {
+      int32_t t_src = edge_list[i].u;      // vértice de origem
+      int32_t t_dst = edge_list[i].v.v;      // vértice de destino
+  
+      // Determina o id do segmento para t_src
+      int32_t seg_id = get_segment_id(t_src);
+  
+      // Se o segmento for menor que a qnt de segmentos do nó 0, a aresta vai para o nó 0; caso contrário, nó 1.
+      if (seg_id < segment_count0) {//Talvez seja <=
+        // Inserção na partição do nó 0
+        int32_t t_degree = vertices_0[t_src].degree;
+        if (t_degree == 0) {
+          if (t_src != last_vid0 + 1) {
+            for (NodeID_ vid = last_vid0 + 1; vid < t_src; vid++) {
+              edges_0[ii0].v = -vid;
+              vertices_0[vid].degree = 1;
+              vertices_0[vid].index = ii0;
+              ii0++;
+              segment_edges_actual_0[get_segment_id(vid)]++;
+            }
+          }
+          edges_0[ii0].v = -t_src;
+          vertices_0[t_src].degree = 1;
+          vertices_0[t_src].index = ii0;
+          ii0++;
+          segment_edges_actual_0[seg_id]++;
+          last_vid0 = t_src;
+        }
+        edges_0[ii0].v = t_dst;
+        ii0++;
+        vertices_0[t_src].degree++;
+        segment_edges_actual_0[seg_id]++;
+      } else {
+        // Inserção na partição do nó 1
+        // Se os vértices para o nó 1 estiverem indexados de forma local, precisamos ajustar:
+        int32_t local_t_src = t_src - n_vertices_node0;
+        int32_t t_degree = vertices_1[local_t_src].degree;
+        // Para os segmentos do nó 1, ajustamos o id removendo a parte dos segmentos do nó 0
+        int32_t seg_id_local = seg_id - segment_count0;
+        if (t_degree == 0) {
+          if (local_t_src != last_vid1 + 1) {
+            for (NodeID_ vid = last_vid1 + 1; vid < local_t_src; vid++) {
+              edges_1[ii1].v = -(vid + n_vertices_node0);
+              vertices_1[vid].degree = 1;
+              vertices_1[vid].index = ii1;
+              ii1++;
+              segment_edges_actual_1[get_segment_id(vid + n_vertices_node0)]++;
+            }
+          }
+          edges_1[ii1].v = -t_src; // ou - (local_t_src + n_vertices_node0)
+          vertices_1[local_t_src].degree = 1;
+          vertices_1[local_t_src].index = ii1;
+          ii1++;
+          segment_edges_actual_1[seg_id_local]++;
+          last_vid1 = local_t_src;
+        }
+        edges_1[ii1].v = t_dst;
+        ii1++;
+        vertices_1[local_t_src].degree++;
+        segment_edges_actual_1[seg_id_local]++;
+      }
+    } // fim do loop principal
+  
+    // Correção para vértices com grau zero em cada partição
+    for (int i = 0; i < n_vertices_node0; i++) {
+      if (vertices_0[i].degree == 0) {
+        assert(i > last_vid0 && "Erro: vértice com grau 0 antes de last_vid0 no nó 0");
+        edges_0[ii0].v = -i;
+        vertices_0[i].degree = 1;
+        vertices_0[i].index = ii0;
+        ii0++;
+        segment_edges_actual_0[get_segment_id(i)]++;
+      }
+      vertices_0[i].offset = -1;
+    }
+    for (int i = 0; i < n_vertices_node1; i++) {
+      if (vertices_1[i].degree == 0) {
+        assert(i > last_vid1 && "Erro: vértice com grau 0 antes de last_vid1 no nó 1");
+        edges_1[ii1].v = -(i + partition_cutoff);
+        vertices_1[i].degree = 1;
+        vertices_1[i].index = ii1;
+        ii1++;
+        segment_edges_actual_1[get_segment_id(i + partition_cutoff)]++;
+      }
+      vertices_1[i].offset = -1;
+    }
+  
+    // Atualiza a contagem de arestas em cada partição (somando os vértices com grau 0)
+    n_edges_node0 += n_vertices_node0;
+    n_edges_node1 += n_vertices_node1;
+  
+    // Chamadas de pós-processamento e flush para cada partição
+    spread_weighted(0, n_vertices_node0); 
+    spread_weighted(0, n_vertices_node1); 
+    flush_clwb_nolog(edges_0, sizeof(DestID_) * elem_capacity_0);
+    flush_clwb_nolog(edges_1, sizeof(DestID_) * elem_capacity_1);
+  }
+  #else
   /// Insert base-graph. Assume all the edges of a vertex comes together (COO format).
   void insert(const EdgeList &edge_list) {
     NodeID_ last_vid = -1;
@@ -949,6 +1470,8 @@ public:
     spread_weighted(0, num_vertices);
     flush_clwb_nolog(edges_, sizeof(DestID_) * elem_capacity);
   }
+  #endif
+
 
   bool have_space_onseg(int32_t src, int64_t loc) {
     if ((src == (num_vertices - 1) && elem_capacity > loc)
