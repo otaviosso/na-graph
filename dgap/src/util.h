@@ -88,6 +88,11 @@ static inline int file_exists(char const *file) {
   return access(file, F_OK);  /* 0 means the file exists */
 }
 
+static inline void delete_file(char const *file) {
+  if (remove(file) != 0) {
+    perror("Error deleting\n");
+}
+
 static inline void check_sanity(struct Base *bp) {
   if (bp == NULL){
     fprintf(stderr, "[%s]: FATAL: The Root Object Not Initalized Yet, Exit!\n", __FUNCTION__);
