@@ -146,14 +146,6 @@ struct Base {
   /* General graph fields */
   int64_t num_vertices;   // Number of vertices
   int64_t num_edges_;     // Number of edges
-  #ifdef NUMA_PMEM
-  int64_t n_vertices_node0;
-  int64_t n_vertices_node1;
-  int64_t n_edges_node0;     // Partição igual para as arestas
-  int64_t n_edges_node1;
-  int64_t segment_count0;
-  int64_t segment_count1;
-  #endif
   /* General PMA fields */
   int64_t elem_capacity; // size of the edges_ array
   int64_t segment_count; // number of pma leaf segments
@@ -1967,6 +1959,14 @@ private:
   int32_t num_vertices = 0;               // Number of vertices
   int32_t max_valid_vertex_id = 0;        // Max valid vertex-id
   int64_t avg_degree = 0;                 // averge degree of the graph
+  #ifdef NUMA_PMEM
+  int64_t n_vertices_node0;
+  int64_t n_vertices_node1;
+  int64_t n_edges_node0;     // Partição igual para as arestas
+  int64_t n_edges_node1;
+  int64_t segment_count0;
+  int64_t segment_count1;
+  #endif
 
   /* General PMA fields */
   int64_t elem_capacity;                  // size of the edges_ array

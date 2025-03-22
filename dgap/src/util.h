@@ -91,6 +91,7 @@ static inline int file_exists(char const *file) {
 static inline void delete_file(char const *file) {
   if (remove(file) != 0) {
     perror("Error deleting\n");
+  }
 }
 
 static inline void check_sanity(struct Base *bp) {
