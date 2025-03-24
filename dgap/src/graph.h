@@ -300,7 +300,16 @@ class CSRGraph {
       return iterator(end_ptr);
     }
   };
-
+  #ifdef NUMA_PMEM
+  void ReleaseResources() {
+    if (vertices_0 != nullptr) free(vertices_0);
+    if (vertices_1 != nullptr) free(vertices_1);
+    if (log_ptr_ != nullptr) free(log_ptr_);
+    if (log_segment_idx_ != nullptr) free(log_segment_idx_);
+    if (segment_edges_actual != nullptr) free(segment_edges_actual);
+    if (segment_edges_total != nullptr) free(segment_edges_total);
+  }
+  #else
   void ReleaseResources() {
     if (vertices_ != nullptr) free(vertices_);
     if (log_ptr_ != nullptr) free(log_ptr_);
@@ -308,7 +317,7 @@ class CSRGraph {
     if (segment_edges_actual != nullptr) free(segment_edges_actual);
     if (segment_edges_total != nullptr) free(segment_edges_total);
   }
-
+  #endif
 
 public:
   #ifdef NUMA_PMEM
@@ -327,9 +336,9 @@ public:
   #ifdef NUMA_PMEM
   
   ~CSRGraph() {
-    memcpy((struct vertex_element *) pmemobj_direct(bp0->vertices_oid_), vertices_,
+    memcpy((struct vertex_element *) pmemobj_direct(bp0->vertices_oid_), vertices_0,
     n_vertices_node0 * sizeof(struct vertex_element));
-    memcpy((struct vertex_element *) pmemobj_direct(bp1->vertices_oid_), vertices_,
+    memcpy((struct vertex_element *) pmemobj_direct(bp1->vertices_oid_), vertices_1,
     n_vertices_node1 * sizeof(struct vertex_element));
     flush_clwb_nolog((struct vertex_element *) pmemobj_direct(bp0->vertices_oid_),
     n_vertices_node0 * sizeof(struct vertex_element));
@@ -341,9 +350,9 @@ public:
     flush_clwb_nolog((int32_t *) pmemobj_direct(bp0->log_segment_idx_oid_), segment_count0 * sizeof(int32_t));
     flush_clwb_nolog((int32_t *) pmemobj_direct(bp1->log_segment_idx_oid_), segment_count1 * sizeof(int32_t));
     
-    memcpy((int64_t *) pmemobj_direct(bp0->segment_edges_actual_oid_), segment_edges_actual,
+    memcpy((int64_t *) pmemobj_direct(bp0->segment_edges_actual_oid_), segment_edges_actual_0,
            sizeof(int64_t) * segment_count * 2);
-    memcpy((int64_t *) pmemobj_direct(bp1->segment_edges_actual_oid_), segment_edges_actual,
+    memcpy((int64_t *) pmemobj_direct(bp1->segment_edges_actual_oid_), segment_edges_actual_1,
            sizeof(int64_t) * segment_count * 2);
     flush_clwb_nolog((int64_t *) pmemobj_direct(bp0->segment_edges_actual_oid_), sizeof(int64_t) * segment_count * 2);
     flush_clwb_nolog((int64_t *) pmemobj_direct(bp1->segment_edges_actual_oid_), sizeof(int64_t) * segment_count * 2);
@@ -436,6 +445,7 @@ public:
     ReleaseResources();
   }
   #endif
+  
   #ifdef NUMA_PMEM
   CSRGraph(const char *file0, const char *file1, const EdgeList &edge_list, bool is_directed, int64_t n_edges, int64_t n_vertices) {
     
@@ -504,7 +514,8 @@ public:
       segment_count1 = segment_count - segment_count0;
 
       // array-based compete tree structure
-      segment_edges_actual = (int64_t *) calloc(segment_count * 2, sizeof(int64_t));
+      segment_edges_actual_0 = (int64_t *) calloc(segment_count * 2, sizeof(int64_t));
+      segment_edges_actual_1 = (int64_t *) calloc(segment_count * 2, sizeof(int64_t));
       segment_edges_total = (int64_t *) calloc(segment_count * 2, sizeof(int64_t));
 
       tree_height = floor_log2(segment_count);
@@ -631,8 +642,6 @@ public:
       edges_0 = (DestID_ *) pmemobj_direct(bp0->edges_oid_);
       edges_1 = (DestID_ *) pmemobj_direct(bp1->edges_oid_);
 
-      struct vertex_element *vertices_0;
-      struct vertex_element *vertices_1;
 
       vertices_0 = (struct vertex_element *) malloc(n_vertices_node0 * sizeof(struct vertex_element));
       memcpy(vertices_0, (struct vertex_element *) pmemobj_direct(bp0->vertices_oid_), n_vertices_node0 * sizeof(struct vertex_element));
@@ -967,6 +976,140 @@ public:
   }
   #endif
 
+
+  #ifdef NUMA_PMEM
+  void recovery() {
+    // =========================
+    // Recuperação para nó 0 (partição 0)
+    // =========================
+    n_edges_node0 = 0;
+    int64_t st_idx = 0;
+    int32_t seg_id = 0;
+    NodeID_ vid = 0;
+    NodeID_ mx_vid = 0;
+    
+    // Se a primeira aresta de edges_0 tiver valor 0, significa que o vértice 0 foi iniciado
+    if (edges_0[st_idx].v == 0) {
+      seg_id = get_segment_id(0); // Para nó 0, os vértices estão com seus IDs globais
+      vertices_0[0].index = st_idx;
+      vertices_0[0].degree = 1;
+      st_idx++;
+      segment_edges_actual_0[seg_id] += 1;
+      n_edges_node0++;
+      while (edges_0[st_idx].v != 0) {
+        st_idx++;
+        vertices_0[0].degree += 1;
+        segment_edges_actual_0[seg_id] += 1;
+        n_edges_node0++;
+      }
+    }
+    
+    // Percorre o array de arestas do nó 0 a partir de st_idx até o fim da capacidade para o nó 0
+    for (int64_t i = st_idx; i < elem_capacity; i++) {
+      if (edges_0[i].v < 0) {
+        vid = -edges_0[i].v;
+        mx_vid = std::max(mx_vid, vid);
+        seg_id = get_segment_id(vid);
+        vertices_0[vid].index = i;
+        vertices_0[vid].degree = 1;
+        segment_edges_actual_0[seg_id] += 1;
+        n_edges_node0++;
+      }
+      if (edges_0[i].v > 0) {
+        // O valor de 'vid' permanece o último vértice processado
+        vertices_0[vid].degree += 1;
+        segment_edges_actual_0[seg_id] += 1;
+        n_edges_node0++;
+      }
+    }
+    
+    cout << "max vertex-id retrieved for node 0: " << mx_vid << endl;
+    cout << "segment_count (node 0): " << segment_count0 << endl;
+    
+    // Reconstrói os totais de arestas por segmento no nó 0
+    recount_segment_total();
+    
+    // Inicializa log_segment_idx_ para nó 0, escaneando cada segmento de log
+    int32_t total_log_entries0 = 0;
+    for (int sid = 0; sid < segment_count0; sid++) {
+      for (int i = 0; i < MAX_LOG_ENTRIES; i++) {
+        if (log_ptr_[sid][i].u && log_ptr_[sid][i].v && log_ptr_[sid][i].prev_offset) {
+          log_segment_idx_[sid] = i;
+        } else {
+          break;
+        }
+      }
+      total_log_entries0 += log_segment_idx_[sid];
+    }
+    cout << "total log entries found for node 0: " << total_log_entries0 << endl;
+    
+    
+    // =========================
+    // Recuperação para nó 1 (partição 1 – vértices reindexados localmente para começar em 0)
+    // =========================
+    n_edges_node1 = 0;
+    st_idx = 0;
+    seg_id = 0;
+    vid = 0;
+    mx_vid = 0;
+    
+    // No nó 1, os vértices foram reindexados localmente, portanto o vértice 0 aqui corresponde
+    // ao primeiro vértice da partição (globalmente: n_vertices_node0)
+    if (edges_1[st_idx].v == 0) {
+      // Para calcular o segmento, é preciso converter o ID local para o global
+      seg_id = get_segment_id(n_vertices_node0);
+      vertices_1[0].index = st_idx;
+      vertices_1[0].degree = 1;
+      st_idx++;
+      segment_edges_actual_1[seg_id - segment_count0] += 1;  // ajusta o índice do segmento para nó 1
+      n_edges_node1++;
+      while (edges_1[st_idx].v != 0) {
+        st_idx++;
+        vertices_1[0].degree += 1;
+        segment_edges_actual_1[seg_id - segment_count0] += 1;
+        n_edges_node1++;
+      }
+    }
+    
+    for (int64_t i = st_idx; i < elem_capacity; i++) {
+      if (edges_1[i].v < 0) {
+        // Recupera o ID global: como os vértices foram reindexados, o ID global é (local ID + n_vertices_node0)
+        vid = -edges_1[i].v;
+        mx_vid = std::max(mx_vid, vid);
+        // Converte o ID local para global para o cálculo do segmento
+        seg_id = get_segment_id(vid + n_vertices_node0);
+        vertices_1[vid].index = i;
+        vertices_1[vid].degree = 1;
+        segment_edges_actual_1[seg_id - segment_count0] += 1;
+        n_edges_node1++;
+      }
+      if (edges_1[i].v > 0) {
+        vertices_1[vid].degree += 1;
+        segment_edges_actual_1[seg_id - segment_count0] += 1;
+        n_edges_node1++;
+      }
+    }
+    
+    cout << "max vertex-id retrieved for node 1: " << mx_vid << endl;
+    cout << "segment_count (node 1): " << segment_count1 << endl;
+    
+    recount_segment_total();
+    
+    int32_t total_log_entries1 = 0;
+    for (int sid = 0; sid < segment_count1; sid++) {
+      for (int i = 0; i < MAX_LOG_ENTRIES; i++) {
+        if (log_ptr_[sid][i].u && log_ptr_[sid][i].v && log_ptr_[sid][i].prev_offset) {
+          log_segment_idx_[sid] = i;
+        } else {
+          break;
+        }
+      }
+      total_log_entries1 += log_segment_idx_[sid];
+    }
+    cout << "total log entries found for node 1: " << total_log_entries1 << endl;
+  }
+  
+  #else
   void recovery() {
     /// rebuild vertices_ by scanning edges_
     /// recount num_edges_ and save it to bp->num_edges_
@@ -1027,6 +1170,7 @@ public:
     }
     cout << "total log entries found: " << total_log_entries << endl;
   }
+  #endif
 
   bool directed() const {
     return directed_;
@@ -1044,6 +1188,26 @@ public:
     return directed_ ? num_edges_ : 2 * num_edges_;
   }
 
+  #ifdef NUMA_PMEM
+  int64_t out_degree(NodeID_ v) const {
+    if (v < n_vertices_node0) {
+        // v pertence ao nó 0
+        return vertices_0[v].degree - 1;
+    } else {
+        // v pertence ao nó 1, converte para índice local
+        return vertices_1[v - n_vertices_node0].degree - 1;
+    }
+}
+
+int64_t in_degree(NodeID_ v) const {
+    static_assert(MakeInverse, "Graph inversion disabled but reading inverse");
+    if (v < n_vertices_node0) {
+        return vertices_0[v].degree - 1;
+    } else {
+        return vertices_1[v - n_vertices_node0].degree - 1;
+    }
+}
+  #else
   int64_t out_degree(NodeID_ v) const {
     return vertices_[v].degree - 1;
   }
@@ -1052,7 +1216,44 @@ public:
     static_assert(MakeInverse, "Graph inversion disabled but reading inverse");
     return vertices_[v].degree - 1;
   }
+  #endif
 
+  #ifdef NUMA_PMEM
+  Neighborhood out_neigh(NodeID_ n, OffsetT start_offset = 0) const {
+    if (n < n_vertices_node0) {
+      int32_t onseg_edges = vertices_0[n].degree;
+      int64_t next_vertex_boundary = (n >= num_vertices - 1) ? (elem_capacity - 1) : vertices_0[n + 1].index - 1;
+      if (vertices_0[n].offset != -1) onseg_edges = next_vertex_boundary - vertices_0[n].index + 1;
+      return Neighborhood(edges_0, (struct vertex_element *) (vertices_0 + n), start_offset + 1, log_ptr_[n / segment_size],
+                          onseg_edges);
+    }
+    else{
+      int32_t onseg_edges = vertices_1[n - n_vertices_node0].degree;
+      int64_t next_vertex_boundary = (n >= num_vertices - 1) ? (elem_capacity - 1) : vertices_1[(n + 1) - n_vertices_node0].index - 1;
+      if (vertices_1[n - n_vertices_node0].offset != -1) onseg_edges = next_vertex_boundary - vertices_1[n - n_vertices_node0].index + 1;
+      return Neighborhood(edges_1, (struct vertex_element *) (vertices_1 + (n - n_vertices_node0)), start_offset + 1, log_ptr_[n / segment_size],
+                          onseg_edges);
+    }
+  }
+
+  Neighborhood in_neigh(NodeID_ n, OffsetT start_offset = 0) const {
+    static_assert(MakeInverse, "Graph inversion disabled but reading inverse");
+    if (n < n_vertices_node0) {
+      int32_t onseg_edges = vertices_0[n].degree;
+      int64_t next_vertex_boundary = (n >= num_vertices - 1) ? (elem_capacity - 1) : vertices_0[n + 1].index - 1;
+      if (vertices_0[n].offset != -1) onseg_edges = next_vertex_boundary - vertices_0[n].index + 1;
+      return Neighborhood(edges_0, (struct vertex_element *) (vertices_0 + n), start_offset + 1, log_ptr_[n / segment_size],
+                          onseg_edges);
+    }
+    else{
+      int32_t onseg_edges = vertices_1[n - n_vertices_node0].degree;
+      int64_t next_vertex_boundary = (n >= num_vertices - 1) ? (elem_capacity - 1) : vertices_1[(n + 1) - n_vertices_node0].index - 1;
+      if (vertices_1[n - n_vertices_node0].offset != -1) onseg_edges = next_vertex_boundary - vertices_1[n - n_vertices_node0].index + 1;
+      return Neighborhood(edges_1, (struct vertex_element *) (vertices_1 + (n - n_vertices_node0)), start_offset + 1, log_ptr_[n / segment_size],
+                          onseg_edges);
+    }
+  }
+  #else
   Neighborhood out_neigh(NodeID_ n, OffsetT start_offset = 0) const {
     int32_t onseg_edges = vertices_[n].degree;
     int64_t next_vertex_boundary = (n >= num_vertices - 1) ? (elem_capacity - 1) : vertices_[n + 1].index - 1;
@@ -1069,6 +1270,9 @@ public:
     return Neighborhood(edges_, (struct vertex_element *) (vertices_ + n), start_offset + 1, log_ptr_[n / segment_size],
                         onseg_edges);
   }
+  #endif
+
+
 
   void PrintStats() const {
     std::cout << "Graph has " << num_vertices << " nodes and "
@@ -1079,6 +1283,19 @@ public:
     std::cout << num_edges_ / num_vertices << std::endl;
   }
 
+  #ifdef NUMA_PMEM //Fazer depois
+  void PrintTopology() const {
+    return;
+  }
+  void PrintTopology(NodeID_ src) const {
+    return;
+  }
+  pvector<SGOffset> VertexOffsets(bool in_graph = false) const {
+    pvector<SGOffset> offsets(num_vertices + 1);
+    return offsets;
+  }
+
+  #else
   void PrintTopology() const {
     for (NodeID_ i = 0; i < num_vertices; i++) {
       if (i && i % 10000000 == 0) std::cout << i / 1000000 << " million vertices processed." << endl;
@@ -1096,18 +1313,122 @@ public:
     }
     std::cout << std::endl;
   }
-
+  
   pvector<SGOffset> VertexOffsets(bool in_graph = false) const {
     pvector<SGOffset> offsets(num_vertices + 1);
     for (NodeID_ n = 0; n < num_vertices + 1; n++)
       offsets[n] = vertices_[n].index - vertices_[0].index;
     return offsets;
   }
-
+  #endif
+  
   Range<NodeID_> vertices() const {
     return Range<NodeID_>(num_nodes());
   }
 
+  #ifdef NUMA_PMEM
+  inline void print_vertices() {
+    for (int i = 0; i < num_vertices; i++) {
+      if (i < n_vertices_node0) {
+        printf("(%d)|%llu,%d| ", i, vertices_0[i].index, vertices_0[i].degree);
+      }
+      else{
+        printf("(%d)|%llu,%d| ", i, vertices_1[i - n_vertices_node0].index, vertices_1[i - n_vertices_node0].degree);
+      }
+    }
+    printf("\n");
+  }
+
+  inline void print_vertices(int32_t from, int32_t to) {
+    for (int32_t i = from; i < to; i++) {
+      if (i < n_vertices_node0) {
+        printf("(%d)|%llu,%d| ", i, vertices_0[i].index, vertices_0[i].degree);
+      }
+      else{
+        printf("(%d)|%llu,%d| ", i, vertices_1[i - n_vertices_node0].index, vertices_1[i - n_vertices_node0].degree);
+      }
+    }
+    printf("\n");
+  }
+
+  inline void print_vertices(int32_t segment_id) {
+    cout << "Print Vertices: ";
+    int32_t from = (segment_id) * segment_size;
+    int32_t to = (segment_id + 1) * segment_size;
+    cout << from << " " << to << endl;
+    print_vertices(from, to);
+  }
+  inline void print_vertex(int32_t vid) {
+    if (vid < n_vertices_node0) {
+      cout << "vertex-id: " << vid << "# index: " << vertices_0[vid].index;
+    cout << ", degree: " << vertices_0[vid].degree << ", log-offset: " << vertices_0[vid].offset << endl;
+    }
+    else{
+      cout << "vertex-id: " << vid << "# index: " << vertices_1[vid - n_vertices_node0].index;
+      cout << ", degree: " << vertices_1[vid - n_vertices_node0].degree << ", log-offset: " << vertices_1[vid - n_vertices_node0].offset << endl;
+    }
+  }
+
+  inline void print_edges() {
+    cout << "Print Edges: ";
+    for (int i = 0; i < elem_capacity; i++) {
+      if (i < n_vertices_node0) {
+        printf("%u ", edges_0[i].v);
+      }
+      else{
+        printf("%u ", edges_1[i - n_vertices_node0].v);
+      }
+    }
+    printf("\n");
+  }
+
+  inline void print_segment() {
+    cout << "Print Segments: ";
+    for (int i = 0; i < segment_count * 2; i++) {
+      printf("(%d)|%llu / %llu| ", i, segment_edges_actual[i], segment_edges_total[i]);
+    }
+    printf("\n");
+  }
+
+  inline void print_segment(int segment_id) {
+    printf("Segment (%d): |%llu / %llu|\n", segment_id, segment_edges_actual[segment_id],
+           segment_edges_total[segment_id]);
+  }
+
+
+  inline void edge_list_boundary_sanity_checker() {
+    for (int32_t curr_vertex = 1; curr_vertex < num_vertices; curr_vertex += 1) {
+      if (curr_vertex < n_vertices_node0) {
+        
+        if (vertices_0[curr_vertex - 1].index + vertices_0[curr_vertex - 1].degree > vertices_0[curr_vertex].index) {
+          cout << "**** Invalid edge-list boundary found at vertex-id: " << curr_vertex - 1 << " index: "
+              << vertices_0[curr_vertex - 1].index;
+          cout << " degree: " << vertices_0[curr_vertex - 1].degree << " next vertex start at: "
+              << vertices_0[curr_vertex].index << endl;
+        }
+        assert(vertices_0[curr_vertex - 1].index + vertices_0[curr_vertex - 1].degree <= vertices_0[curr_vertex].index &&
+              "Invalid edge-list boundary found!");
+        
+        assert(vertices_0[num_vertices - 1].index + vertices_0[num_vertices - 1].degree <= elem_capacity &&
+            "Invalid edge-list boundary found!");
+      }
+      else {
+        
+        if (vertices_1[curr_vertex - 1 - n_vertices_node0].index + vertices_1[curr_vertex - 1 - n_vertices_node0].degree > vertices_1[curr_vertex - n_vertices_node0].index) {
+          cout << "**** Invalid edge-list boundary found at vertex-id: " << curr_vertex - 1 << " index: "
+              << vertices_1[curr_vertex - 1 - n_vertices_node0].index;
+          cout << " degree: " << vertices_1[curr_vertex - 1 - n_vertices_node0].degree << " next vertex start at: "
+              << vertices_1[curr_vertex - n_vertices_node0].index << endl;
+        }
+        assert(vertices_1[curr_vertex - 1 - n_vertices_node0].index + vertices_1[curr_vertex - 1 - n_vertices_node0].degree <= vertices_1[curr_vertex - n_vertices_node0].index &&
+              "Invalid edge-list boundary found!");
+        
+        assert(vertices_1[num_vertices - 1 - n_vertices_node0].index + vertices_1[num_vertices - 1 - n_vertices_node0].degree <= elem_capacity &&
+            "Invalid edge-list boundary found!");
+      }
+    }
+  }
+  #else
   inline void print_vertices() {
     for (int i = 0; i < num_vertices; i++) {
       printf("(%d)|%llu,%d| ", i, vertices_[i].index, vertices_[i].degree);
@@ -1156,13 +1477,6 @@ public:
            segment_edges_total[segment_id]);
   }
 
-  inline void print_pma_meta() {
-    cout << "max_size: " << max_size << ", num_edges: " << num_edges_ << ", num_vertices: " << num_vertices
-         << ", avg_degree: " << avg_degree << ", elem_capacity: " << elem_capacity << endl;
-    cout << "segment_count: " << segment_count << ", segment_size: " << segment_size << ", tree_height: " << tree_height
-         << endl;
-  }
-
   inline void edge_list_boundary_sanity_checker() {
     for (int32_t curr_vertex = 1; curr_vertex < num_vertices; curr_vertex += 1) {
       if (vertices_[curr_vertex - 1].index + vertices_[curr_vertex - 1].degree > vertices_[curr_vertex].index) {
@@ -1178,12 +1492,26 @@ public:
            "Invalid edge-list boundary found!");
   }
 
+  #endif
+
+  inline void print_pma_meta() {
+    cout << "max_size: " << max_size << ", num_edges: " << num_edges_ << ", num_vertices: " << num_vertices
+         << ", avg_degree: " << avg_degree << ", elem_capacity: " << elem_capacity << endl;
+    cout << "segment_count: " << segment_count << ", segment_size: " << segment_size << ", tree_height: " << tree_height
+         << endl;
+  }
+
   /*****************************************************************************
    *                                                                           *
    *   PMA                                                                     *
    *                                                                           *
    *****************************************************************************/
   /// Double the size of the "edges_" array
+  #ifdef NUMA_PMEM
+  void resize_V1(){
+    return;
+  }
+  #else
   void resize_V1() {
     elem_capacity *= 2;
     int64_t gaps = elem_capacity - num_edges_;
@@ -1246,6 +1574,7 @@ public:
       release_log(i - segment_count);
     }
   }
+  #endif
 
   inline int32_t get_segment_id(int32_t vertex_id) {
     return (vertex_id / segment_size) + segment_count;
@@ -1256,8 +1585,10 @@ public:
     recount_segment_total();
   }
 
-  // Expected to run in single thread
-  void recount_segment_actual() {
+ 
+  #ifdef NUMA_PMEM
+   // Expected to run in single thread
+   void recount_segment_actual() {
     // count the size of each segment in the tree
     num_edges_ = 0;
     memset(segment_edges_actual, 0, sizeof(int64_t) * segment_count * 2);
@@ -1267,8 +1598,15 @@ public:
 
       int32_t segment_actual_p = 0;
       for (int32_t vid = start_vertex; vid < end_vertex; vid += 1) {
-        segment_actual_p += vertices_[vid].degree;
-        num_edges_ += vertices_[vid].degree;
+        if(vid < n_vertices_node0){
+          segment_actual_p += vertices_0[vid].degree;
+          num_edges_ += vertices_0[vid].degree;
+        }
+        else{
+          segment_actual_p += vertices_1[vid - n_vertices_node0].degree;
+          num_edges_ += vertices_1[vid - n_vertices_node0].degree;
+        }
+        
       }
 
       int32_t j = seg_id + segment_count;  //tree leaves
@@ -1276,6 +1614,52 @@ public:
     }
   }
 
+  void recount_segment_total() {
+    // Zera o array de total de arestas para a partição do nó 0.
+    memset(segment_edges_total, 0, sizeof(int64_t) * segment_count * 2);
+    int32_t j;
+    int64_t next_starter;
+    int64_t segment_total_p;
+    for (int i = 0; i < segment_count; i++) {
+        // Determina o índice inicial do próximo segmento ou usa elem_capacity para o último.
+        if(i < n_vertices_node0){
+          next_starter = (i == segment_count - 1) ? elem_capacity : vertices_0[(i + 1) * segment_size].index;
+          segment_total_p = next_starter - vertices_0[i * segment_size].index;
+          // Armazena o total para a folha correspondente (segmento da árvore).
+          j = i + segment_count0;  // índice na parte das folhas da árvore
+
+        }
+        else{
+          next_starter = (i == segment_count - 1) ? elem_capacity : vertices_1[(i + 1 - n_vertices_node0) * segment_size].index;
+          segment_total_p = next_starter - vertices_1[(i - n_vertices_node0) * segment_size].index;
+          // Armazena o total para a folha correspondente (segmento da árvore).
+          j = i + segment_count1;  // índice na parte das folhas da árvore
+        }
+        
+        segment_edges_total[j] = segment_total_p;
+    }
+}
+
+#else
+ // Expected to run in single thread
+ void recount_segment_actual() {
+  // count the size of each segment in the tree
+  num_edges_ = 0;
+  memset(segment_edges_actual, 0, sizeof(int64_t) * segment_count * 2);
+  for (int seg_id = 0; seg_id < segment_count; seg_id++) {
+    int32_t start_vertex = (seg_id * segment_size);
+    int32_t end_vertex = min(((seg_id + 1) * segment_size), num_vertices);
+
+    int32_t segment_actual_p = 0;
+    for (int32_t vid = start_vertex; vid < end_vertex; vid += 1) {
+      segment_actual_p += vertices_[vid].degree;
+      num_edges_ += vertices_[vid].degree;
+    }
+
+    int32_t j = seg_id + segment_count;  //tree leaves
+    segment_edges_actual[j] = segment_actual_p;
+  }
+}
   // Expected to run in single thread
   void recount_segment_total() {
     // count the size of each segment in the tree
@@ -1287,7 +1671,6 @@ public:
       segment_edges_total[j] = segment_total_p;
     }
   }
-
   // Expected to run in single thread
   void recount_segment_total(int32_t start_vertex, int32_t end_vertex) {
     int32_t start_seg = get_segment_id(start_vertex) - segment_count;
@@ -1300,6 +1683,7 @@ public:
       segment_edges_total[j] = segment_total_p;
     }
   }
+#endif
   #ifdef NUMA_PMEM
   void insert(const EdgeList &edge_list) {
     // Variáveis de controle para cada partição
@@ -1341,7 +1725,7 @@ public:
         segment_edges_actual_0[seg_id]++;
       } else {
         // Inserção na partição do nó 1
-        // Se os vértices para o nó 1 estiverem indexados de forma local, precisamos ajustar:
+        // Os vértices para o nó 1 estão indexados de forma local, precisamos ajustar:
         int32_t local_t_src = t_src - n_vertices_node0;
         int32_t t_degree = vertices_1[local_t_src].degree;
         // Para os segmentos do nó 1, ajustamos o id removendo a parte dos segmentos do nó 0
@@ -1385,11 +1769,11 @@ public:
     for (int i = 0; i < n_vertices_node1; i++) {
       if (vertices_1[i].degree == 0) {
         assert(i > last_vid1 && "Erro: vértice com grau 0 antes de last_vid1 no nó 1");
-        edges_1[ii1].v = -(i + partition_cutoff);
+        edges_1[ii1].v = -(i + n_vertices_node0);
         vertices_1[i].degree = 1;
         vertices_1[i].index = ii1;
         ii1++;
-        segment_edges_actual_1[get_segment_id(i + partition_cutoff)]++;
+        segment_edges_actual_1[get_segment_id(i + n_vertices_node0)]++;
       }
       vertices_1[i].offset = -1;
     }
@@ -1401,8 +1785,8 @@ public:
     // Chamadas de pós-processamento e flush para cada partição
     spread_weighted(0, n_vertices_node0); 
     spread_weighted(0, n_vertices_node1); 
-    flush_clwb_nolog(edges_0, sizeof(DestID_) * elem_capacity_0);
-    flush_clwb_nolog(edges_1, sizeof(DestID_) * elem_capacity_1);
+    flush_clwb_nolog(edges_0, sizeof(DestID_) * elem_capacity);
+    flush_clwb_nolog(edges_1, sizeof(DestID_) * elem_capacity);
   }
   #else
   /// Insert base-graph. Assume all the edges of a vertex comes together (COO format).
@@ -1464,7 +1848,31 @@ public:
   }
   #endif
 
+  #ifdef NUMA_PMEM //Fazer depois
+  bool have_space_onseg(int32_t src, int64_t loc) {
+    return true;
+  }
+  void insert(int32_t src, int32_t dst) {
+    return;
+  }
 
+  inline void do_insertion(int32_t src, int32_t dst, int32_t src_segment) {
+    return;
+  }
+
+  inline void insert_into_log(int32_t segment_id, int32_t src, int32_t dst){
+    return;
+  }
+  inline void print_per_vertex_log(int32_t vid) {
+    return;
+  }
+  inline void print_log(int32_t segment_id) {
+    return;
+  }
+  inline void release_log(int32_t segment_id) {
+    return;
+  }
+  #else
   bool have_space_onseg(int32_t src, int64_t loc) {
     if ((src == (num_vertices - 1) && elem_capacity > loc)
         || (src < (num_vertices - 1) && vertices_[src + 1].index > loc))
@@ -1654,7 +2062,7 @@ public:
     flush_clwb_nolog(&log_ptr_[segment_id], sizeof(struct LogEntry) * log_segment_idx_[segment_id]);
     log_segment_idx_[segment_id] = 0;
   }
-
+  #endif
   /// Calculate PMA-parameters.
   void compute_capacity() {
     segment_size = ceil_log2(num_vertices); // Ideal segment size
@@ -1673,6 +2081,64 @@ public:
 
   /// Spread the edges based on the degree of source vertices.
   /// Here, end_vertex is excluded, and start_vertex is expected to be 0
+  #ifdef NUMA_PMEM
+  void spread_weighted(int32_t start_vertex, int32_t end_vertex) {
+    assert(start_vertex == 0 && "start-vertex is expected to be 0 here.");
+    int64_t gaps = elem_capacity - num_edges_;
+    int64_t *new_positions = calculate_positions(start_vertex, end_vertex, gaps, num_edges_);
+
+    int64_t read_index0, read_index1, write_index0, write_index1, curr_degree;
+    for (int32_t curr_vertex = end_vertex - 1; curr_vertex > start_vertex; curr_vertex -= 1) {
+      if(curr_vertex < n_vertices_node0){
+        curr_degree = vertices_0[curr_vertex].degree;
+        read_index0 = vertices_0[curr_vertex].index + curr_degree - 1;
+        write_index0 = new_positions[curr_vertex] + curr_degree - 1;
+        if (write_index0 < read_index0) {
+          cout << "current-vertex: " << curr_vertex << ", read: " << read_index0 << ", write: " << write_index0
+               << ", degree: " << curr_degree << endl;
+        }
+        assert(write_index0 >= read_index0 && "index anomaly occurred while spreading elements");
+      }
+      else{
+        curr_degree = vertices_1[curr_vertex - n_vertices_node0].degree;
+        read_index1 = vertices_1[curr_vertex - n_vertices_node0].index + curr_degree - 1;
+        write_index1 = new_positions[curr_vertex] + curr_degree - 1;
+        if (write_index1 < read_index1) {
+          cout << "current-vertex: " << curr_vertex << ", read: " << read_index1 << ", write: " << write_index1
+               << ", degree: " << curr_degree << endl;
+        }
+        assert(write_index1 >= read_index1 && "index anomaly occurred while spreading elements");
+      }
+      
+
+      for (int i = 0; i < curr_degree; i++) {
+        if(i < n_vertices_node0){
+          edges_0[write_index0] = edges_0[read_index0];
+          write_index0--;
+          read_index0--;
+        }
+        else{
+          edges_1[write_index1] = edges_1[read_index1];
+          write_index1--;
+          read_index1--;
+        }
+        
+      }
+      if(curr_vertex < n_vertices_node0){
+        vertices_0[curr_vertex].index = new_positions[curr_vertex];
+      }
+      else{
+        vertices_1[curr_vertex - n_vertices_node0].index = new_positions[curr_vertex];
+      }
+      
+    }
+
+    // note: we do not need to flush the data in PMEM from here, it is managed from the caller function
+    free(new_positions);
+    new_positions = nullptr;
+    recount_segment_total();
+  }
+  #else
   void spread_weighted(int32_t start_vertex, int32_t end_vertex) {
     assert(start_vertex == 0 && "start-vertex is expected to be 0 here.");
     int64_t gaps = elem_capacity - num_edges_;
@@ -1704,7 +2170,7 @@ public:
     new_positions = nullptr;
     recount_segment_total();
   }
-
+  #endif
   /// Take the locks of the segments [@left_segment, @right_segment); exclude @src_segment to increment the CV counter
   inline pair <int64_t, int64_t> lock_in_batch(int32_t left_segment, int32_t right_segment, int32_t src_segment) {
     pair <int64_t, int64_t> ret = make_pair(0l, 0l);
@@ -1770,6 +2236,135 @@ public:
   /// Calculate the starting index of each vertex for [@start_vertex, @end_vertex) based on the degree of vertices
   /// @total_degree is the sum of degrees of [@start_vertex, @end_vertex)
   /// @gaps are the sum of empty spaces after the per-vertex neighbors of [@start_vertex, @end_vertex)
+  #ifdef NUMA_PMEM
+  int64_t *calculate_positions(int32_t start_vertex, int32_t end_vertex, int64_t gaps, int64_t total_degree) {
+    int32_t size = end_vertex - start_vertex;
+    int64_t *new_index = (int64_t *) calloc(size, sizeof(int64_t));
+    total_degree += size;
+    double index_d;
+    int64_t index_boundary;
+    if(end_vertex < n_vertices_node0){
+      index_boundary = (end_vertex >= num_vertices) ? elem_capacity : vertices_0[end_vertex].index;
+    }
+    else{
+      index_boundary = (end_vertex >= num_vertices) ? elem_capacity : vertices_1[end_vertex - n_vertices_node0].index;
+    }
+    if(end_vertex < n_vertices_node0){
+      index_d = vertices_0[start_vertex].index;
+    }
+    else{
+      index_d = vertices_1[start_vertex - n_vertices_node0].index;
+    }
+    
+    double step = ((double) gaps) / total_degree;  //per-edge step
+    double precision_pos = 100000000.0;
+    assert(((int64_t)(step * precision_pos)) > 0l && "fixed-precision is going to cause problem!");
+    step = ((double) ((int64_t)(step * precision_pos))) / precision_pos;
+    for (int i = start_vertex; i < end_vertex; i++) {
+      new_index[i - start_vertex] = index_d;
+      if(end_vertex < n_vertices_node0){
+        assert(new_index[i - start_vertex] + vertices_0[i].degree <= index_boundary && "index calculation is wrong!");
+
+        index_d = new_index[i - start_vertex];
+        index_d += (vertices_0[i].degree + (step * (vertices_0[i].degree + 1)));
+      }
+      else{
+        assert(new_index[i - start_vertex] + vertices_1[i - n_vertices_node0].degree <= index_boundary && "index calculation is wrong!");
+
+        index_d = new_index[i - start_vertex];
+        index_d += (vertices_1[i - n_vertices_node0].degree + (step * (vertices_1[i - n_vertices_node0].degree + 1)));
+      }
+      
+//      index_d += (vertices_[i].degree + (step * vertices_[i].degree));
+    }
+
+    return new_index;
+  }
+
+  void rebalance_weighted(int32_t start_vertex,
+    int32_t end_vertex,
+    int64_t used_space, int64_t total_space, int32_t src = -1, int32_t dst = -1) {
+    int64_t from;
+    int64_t to;
+    int64_t capacity;
+    int64_t gaps;
+    int32_t size;
+    int64_t *new_index;
+    int64_t index_boundary;
+    if(start_vertex < n_vertices_node0){
+      from = vertices_0[start_vertex].index;
+    }
+    else{
+      from = vertices_1[start_vertex - n_vertices_node0].index;
+    }
+    if(end_vertex < n_vertices_node0){
+      to = (end_vertex >= num_vertices) ? elem_capacity : vertices_0[end_vertex].index;
+      assert(to > from && "Invalid range found while doing weighted rebalance");
+      capacity = to - from;
+
+      assert(total_space == capacity && "Segment capacity is not matched with segment_edges_total");
+      gaps = total_space - used_space;
+
+      // calculate the future positions of the vertices_[i].index
+      size = end_vertex - start_vertex;
+      new_index = calculate_positions(start_vertex, end_vertex, gaps, used_space);
+      index_boundary = (end_vertex >= num_vertices) ? elem_capacity : vertices_0[end_vertex].index;
+      assert(new_index[size - 1] + vertices_0[end_vertex - 1].degree <= index_boundary &&
+      "Rebalance (weighted) index calculation is wrong!");
+    }
+    else{
+      to = (end_vertex >= num_vertices) ? elem_capacity : vertices_1[end_vertex - n_vertices_node0].index;
+      assert(to > from && "Invalid range found while doing weighted rebalance");
+      capacity = to - from;
+
+      assert(total_space == capacity && "Segment capacity is not matched with segment_edges_total");
+      gaps = total_space - used_space;
+
+      // calculate the future positions of the vertices_[i].index
+      size = end_vertex - start_vertex;
+      new_index = calculate_positions(start_vertex, end_vertex, gaps, used_space);
+      index_boundary = (end_vertex >= num_vertices) ? elem_capacity : vertices_1[end_vertex - n_vertices_node0].index;
+      assert(new_index[size - 1] + vertices_1[end_vertex - 1 - n_vertices_node0].degree <= index_boundary &&
+      "Rebalance (weighted) index calculation is wrong!");
+    }
+    rebalance_data_V1(start_vertex, end_vertex, new_index);
+
+    free(new_index);
+    new_index = nullptr;
+    recount_segment_total(start_vertex, end_vertex);
+  }
+  inline void
+  load_into_ulog(int tid, int64_t load_idx_st, int32_t load_sz, int64_t flush_idx_st, int64_t flush_idx_nd) {
+    // flush the last entries
+    if(flush_idx_st < n_vertices_node0){
+      if (flush_idx_st != flush_idx_nd) {
+        flush_clwb_nolog(&edges_0[flush_idx_st], sizeof(DestID_) * (flush_idx_nd - flush_idx_st + 1));
+      }
+  //    memcpy(ulog_ptr_[tid], edges_+load_idx_st, sizeof(DestID_) * MAX_ULOG_ENTRIES);
+      memcpy(ulog_ptr_[tid], edges_0 + load_idx_st, sizeof(DestID_) * load_sz);
+      flush_clwb_nolog(&ulog_ptr_[tid], sizeof(DestID_) * MAX_ULOG_ENTRIES);
+      oplog_ptr_0[tid] = load_idx_st;
+      flush_clwb_nolog(&oplog_ptr_0[tid], sizeof(int64_t));
+    }
+    else{
+      if (flush_idx_st != flush_idx_nd) {
+        flush_clwb_nolog(&edges_1[flush_idx_st - n_vertices_node0], sizeof(DestID_) * (flush_idx_nd - flush_idx_st + 1));
+      }
+  //    memcpy(ulog_ptr_[tid], edges_+load_idx_st, sizeof(DestID_) * MAX_ULOG_ENTRIES);
+      memcpy(ulog_ptr_[tid], edges_1 + load_idx_st, sizeof(DestID_) * load_sz);
+      flush_clwb_nolog(&ulog_ptr_[tid], sizeof(DestID_) * MAX_ULOG_ENTRIES);
+      oplog_ptr_1[tid - n_vertices_node0] = load_idx_st;
+      flush_clwb_nolog(&oplog_ptr_1[tid - n_vertices_node0], sizeof(int64_t));
+
+    }
+}
+
+inline void
+rebalance_data_V1(int32_t start_vertex, int32_t end_vertex, int64_t *new_index, bool from_resize = false) {
+  return;
+}
+
+  #else
   int64_t *calculate_positions(int32_t start_vertex, int32_t end_vertex, int64_t gaps, int64_t total_degree) {
     int32_t size = end_vertex - start_vertex;
     int64_t *new_index = (int64_t *) calloc(size, sizeof(int64_t));
@@ -1938,7 +2533,7 @@ public:
       release_log(i - segment_count);
     }
   }
-
+  #endif
 private:
   bool directed_;
   int64_t max_size = (1ULL << 56) - 1ULL;
@@ -1975,9 +2570,15 @@ private:
   int32_t tree_height;                    // height of the pma tree
   double delta_up;                        // Delta for upper density threshold
   double delta_low;                       // Delta for lower density threshold
-
+  #ifdef NUMA_PMEM
+  DestID_ *edges_0;
+  DestID_ *edges_1;
+  struct vertex_element *vertices_0;
+  struct vertex_element *vertices_1;
+  #else
   DestID_ *edges_;                        // Underlying storage for edgelist
   struct vertex_element *vertices_;       // underlying storage for vertex list
+  #endif
 
   struct LogEntry *log_base_ptr_;         // mapping of pmem::log_segment_oid_
   struct LogEntry **log_ptr_;             // pointer of logs per segment
@@ -1990,10 +2591,13 @@ private:
   int num_threads;                        // max (available) number of concurrent write threads
   DestID_ *ulog_base_ptr_;                // base pointer of the undo-log; used to track the group allocation of undo-logs
   DestID_ **ulog_ptr_;                    // array of undo-log pointers (array size is number of write threads)
-  int64_t *oplog_ptr_;                    // keeps the start index in the edge array that is backed up in undo-log
   #ifdef NUMA_PMEM
+  int64_t *segment_edges_actual_0;   
+  int64_t *segment_edges_actual_1;          // actual number of edges stored in the region of a binary-tree node
   int64_t *oplog_ptr_0;
   int64_t *oplog_ptr_1;
+  #else
+  int64_t *oplog_ptr_;                    // keeps the start index in the edge array that is backed up in undo-log
   #endif
 };
 

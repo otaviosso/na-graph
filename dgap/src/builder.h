@@ -105,7 +105,7 @@ class BuilderBase {
       });
     }
 
-    CSRGraph<NodeID_, DestID_, invert> g(cli_.dbfilename().c_str(), el, !symmetrize_, base_graph_num_edges_, num_nodes_);
+    CSRGraph<NodeID_, DestID_, invert> g(cli_.dbfilename().c_str(), cli_.dbfilename().c_str(), el, !symmetrize_, base_graph_num_edges_, num_nodes_);
 
     if(needs_ingestion_) {
       el.clear();
