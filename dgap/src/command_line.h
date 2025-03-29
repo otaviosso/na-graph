@@ -26,20 +26,21 @@ Handles command line argument parsing
 
 
 class CLBase {
- protected:
-  int argc_;
-  char** argv_;
-  std::string name_;
-  std::string get_args_ = "B:D:f:g:hk:su:";
-  std::vector<std::string> help_strings_;
-
-  int scale_ = -1;
-  int degree_ = 16;
-  std::string base_filename_ = "";
-  std::string dynamic_filename_ = "";
-  std::string dbfilename_ = "";
-  bool symmetrize_ = false;
-  bool uniform_ = false;
+  protected:
+   int argc_;
+   char** argv_;
+   std::string name_;
+   std::string get_args_ = "B:D:f:m:g:hk:su:"; // Adicionado 'n:'
+   std::vector<std::string> help_strings_;
+ 
+   int scale_ = -1;
+   int degree_ = 16;
+   std::string base_filename_ = "";
+   std::string dynamic_filename_ = "";
+   std::string dbfilename1_ = "";  // Primeiro arquivo
+   std::string dbfilename2_ = "";  // Segundo arquivo
+   bool symmetrize_ = false;
+   bool uniform_ = false;
 
   void AddHelpLine(char opt, std::string opt_arg, std::string text,
                    std::string def = "") {
@@ -55,12 +56,13 @@ class CLBase {
   }
 
  public:
-  CLBase(int argc, char** argv, std::string name = "") :
-         argc_(argc), argv_(argv), name_(name) {
+  CLBase(int argc, char** argv, std::string name = "")
+         : argc_(argc), argv_(argv), name_(name) {
     AddHelpLine('h', "", "print this help message");
     AddHelpLine('B', "base_filename_", "load base-graph from file");
     AddHelpLine('D', "dynamic_filename_", "load dynamic-graph from file");
-    AddHelpLine('f', "dbfile", "pmem file to store the graph");
+    AddHelpLine('f', "dbfile1", "pmem file to store the first graph");  // -f
+    AddHelpLine('m', "dbfile2", "pmem file to store the second graph"); // -n
     AddHelpLine('s', "", "symmetrize input edge list", "false");
     AddHelpLine('g', "scale", "generate 2^scale kronecker graph");
     AddHelpLine('u', "scale", "generate 2^scale uniform-random graph");
@@ -68,6 +70,7 @@ class CLBase {
                 std::to_string(degree_));
   }
 
+  
   bool ParseArgs() {
     signed char c_opt;
     extern char *optarg;          // from and for getopt
@@ -89,7 +92,8 @@ class CLBase {
     switch (opt) {
       case 'B': base_filename_ = std::string(opt_arg);      break;
       case 'D': dynamic_filename_ = std::string(opt_arg);   break;
-      case 'f': dbfilename_ = std::string(opt_arg);         break;
+      case 'f': dbfilename1_ = std::string(opt_arg);        break; // -f
+      case 'm': dbfilename2_ = std::string(opt_arg);        break; // -n
       case 'g': scale_ = atoi(opt_arg);                     break;
       case 'h': PrintUsage();                               break;
       case 'k': degree_ = atoi(opt_arg);                    break;
@@ -110,7 +114,8 @@ class CLBase {
   int degree() const { return degree_; }
   std::string base_filename() const { return base_filename_; }
   std::string dynamic_filename() const { return dynamic_filename_; }
-  std::string dbfilename() const { return dbfilename_; }
+  std::string dbfilename1() const { return dbfilename1_; }
+  std::string dbfilename2() const { return dbfilename2_; }
   bool symmetrize() const { return symmetrize_; }
   bool uniform() const { return uniform_; }
 };

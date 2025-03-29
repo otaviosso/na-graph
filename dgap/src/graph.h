@@ -451,7 +451,7 @@ public:
     
     bool is_new = false;
     num_threads = omp_get_max_threads(); //Talvez dividir por 2?
-
+    printf("File 0: %s \nFile 1: %s\n", file0,file1);
     /* file1 already exists */
     if((file_exists(file0)!= 0) || (file_exists(file1)!= 0)){ 
         //If one of the files does not exist, it delete the other and create new ones.
@@ -510,9 +510,10 @@ public:
       n_edges_node0 = n_edges / 2;     // Exemplo: partição igual para as aresta
       n_edges_node1 = n_edges - n_edges_node0;
       compute_capacity();
-      segment_count0 = segment_count /2; //Depois do compute_capacity
+      segment_count0 = segment_count/2; //Depois do compute_capacity
       segment_count1 = segment_count - segment_count0;
-
+      printf("seg0: %d\n seg1:%d\n segTotal:%d\n", segment_count0, segment_count1, segment_count);
+      printf("Foi até aki0\n");
       // array-based compete tree structure
       segment_edges_actual_0 = (int64_t *) calloc(segment_count * 2, sizeof(int64_t));
       segment_edges_actual_1 = (int64_t *) calloc(segment_count * 2, sizeof(int64_t));
@@ -540,6 +541,7 @@ public:
       bp1->segment_count = segment_count1;
       bp1->segment_size = segment_size;
       bp1->tree_height = tree_height;
+      printf("Foi até aki1\n");
       // allocate memory for vertices and edges in pmem-domain
       // shouldn't the vertex array be volatile? - OTAVIO
       if (pmemobj_zalloc(pop0, &bp0->vertices_oid_, n_vertices_node0 * sizeof(struct vertex_element), VERTEX_TYPE)) {
@@ -583,7 +585,7 @@ public:
         fprintf(stderr, "[%s]: FATAL: per-segment log index allocation failed: %s\n", __func__, pmemobj_errormsg());
         abort();
       }
-
+      printf("Foi até aki2\n");
 
 
 
@@ -637,12 +639,10 @@ public:
 
       //Como dividir em dois
       //edges_ = (DestID_ *) pmemobj_direct(bp->edges_oid_);
-      DestID_ *edges_0;
-      DestID_ *edges_1;
       edges_0 = (DestID_ *) pmemobj_direct(bp0->edges_oid_);
       edges_1 = (DestID_ *) pmemobj_direct(bp1->edges_oid_);
 
-
+      printf("Foi até aki3\n");
       vertices_0 = (struct vertex_element *) malloc(n_vertices_node0 * sizeof(struct vertex_element));
       memcpy(vertices_0, (struct vertex_element *) pmemobj_direct(bp0->vertices_oid_), n_vertices_node0 * sizeof(struct vertex_element));
 
@@ -696,7 +696,7 @@ public:
       }     
       oplog_ptr_1 = (int64_t *) pmemobj_direct(bp1->oplog_oid_);
 
-
+      printf("Foi até aki4\n");
       // leaf segment concurrency primitives
       leaf_segments = new PMALeafSegment[segment_count];
       /// insert base-graph edges
@@ -710,7 +710,7 @@ public:
       bp1->backed_up_ = false;
       flush_clwb_nolog(&bp0->backed_up_, sizeof(bool));
       flush_clwb_nolog(&bp1->backed_up_, sizeof(bool));
-      //até aki
+      printf("Foi até aki5\n");
     } /*else {
       Timer t_reboot;
       t_reboot.Start();
@@ -1577,7 +1577,11 @@ int64_t in_degree(NodeID_ v) const {
   #endif
 
   inline int32_t get_segment_id(int32_t vertex_id) {
+    #ifdef NUMA_PMEM
+    return (vertex_id / segment_size);
+    #else
     return (vertex_id / segment_size) + segment_count;
+    #endif
   }
 
   void reconstruct_pma_tree() {
@@ -1691,14 +1695,17 @@ int64_t in_degree(NodeID_ v) const {
     int64_t ii0 = 0, ii1 = 0;
   
     // Itera por todas as arestas do edge_list
+    printf("Num edges: %d\n", num_edges_);
     for (int i = 0; i < num_edges_; i++) {
       int32_t t_src = edge_list[i].u;      // vértice de origem
       int32_t t_dst = edge_list[i].v.v;      // vértice de destino
   
       // Determina o id do segmento para t_src
       int32_t seg_id = get_segment_id(t_src);
-  
+      printf("Foi até aki6\n");
+      printf("Seg id: %d\nt_src:%d\n", seg_id, t_src);
       // Se o segmento for menor que a qnt de segmentos do nó 0, a aresta vai para o nó 0; caso contrário, nó 1.
+      printf("segment count0: %d\n segment count1: %d\n", segment_count0, segment_count1);
       if (seg_id < segment_count0) {//Talvez seja <=
         // Inserção na partição do nó 0
         int32_t t_degree = vertices_0[t_src].degree;
@@ -1709,9 +1716,12 @@ int64_t in_degree(NodeID_ v) const {
               vertices_0[vid].degree = 1;
               vertices_0[vid].index = ii0;
               ii0++;
+              printf("Foi até aki6.5\n");
               segment_edges_actual_0[get_segment_id(vid)]++;
+              printf("VID: %d\n");
             }
           }
+          printf("Foi até aki7\n");
           edges_0[ii0].v = -t_src;
           vertices_0[t_src].degree = 1;
           vertices_0[t_src].index = ii0;
@@ -1723,10 +1733,12 @@ int64_t in_degree(NodeID_ v) const {
         ii0++;
         vertices_0[t_src].degree++;
         segment_edges_actual_0[seg_id]++;
+        printf("Foi até aki8\n");
       } else {
         // Inserção na partição do nó 1
         // Os vértices para o nó 1 estão indexados de forma local, precisamos ajustar:
         int32_t local_t_src = t_src - n_vertices_node0;
+        printf("vertices no 0: %d\n", n_vertices_node0);
         int32_t t_degree = vertices_1[local_t_src].degree;
         // Para os segmentos do nó 1, ajustamos o id removendo a parte dos segmentos do nó 0
         int32_t seg_id_local = seg_id - segment_count0;
@@ -1740,6 +1752,8 @@ int64_t in_degree(NodeID_ v) const {
               segment_edges_actual_1[get_segment_id(vid + n_vertices_node0)]++;
             }
           }
+          printf("Foi até aki9\n");
+          printf("local_t_src: %d\n", local_t_src);
           edges_1[ii1].v = -t_src; // ou - (local_t_src + n_vertices_node0)
           vertices_1[local_t_src].degree = 1;
           vertices_1[local_t_src].index = ii1;
@@ -1751,6 +1765,7 @@ int64_t in_degree(NodeID_ v) const {
         ii1++;
         vertices_1[local_t_src].degree++;
         segment_edges_actual_1[seg_id_local]++;
+        printf("Foi até aki10\n");
       }
     } // fim do loop principal
   
@@ -1766,6 +1781,7 @@ int64_t in_degree(NodeID_ v) const {
       }
       vertices_0[i].offset = -1;
     }
+    printf("Foi até aki11\n");
     for (int i = 0; i < n_vertices_node1; i++) {
       if (vertices_1[i].degree == 0) {
         assert(i > last_vid1 && "Erro: vértice com grau 0 antes de last_vid1 no nó 1");
@@ -1777,14 +1793,15 @@ int64_t in_degree(NodeID_ v) const {
       }
       vertices_1[i].offset = -1;
     }
-  
+    
     // Atualiza a contagem de arestas em cada partição (somando os vértices com grau 0)
     n_edges_node0 += n_vertices_node0;
     n_edges_node1 += n_vertices_node1;
-  
+    printf("Foi até aki12\n");
     // Chamadas de pós-processamento e flush para cada partição
     spread_weighted(0, n_vertices_node0); 
     spread_weighted(0, n_vertices_node1); 
+    printf("Foi até akiSpread\n");
     flush_clwb_nolog(edges_0, sizeof(DestID_) * elem_capacity);
     flush_clwb_nolog(edges_1, sizeof(DestID_) * elem_capacity);
   }

@@ -75,7 +75,36 @@ class BuilderBase {
     bool needs_ingestion_ = true;
     EdgeList el;
     Timer t;
+    #ifdef NUMA_PMEM
+    /* pmem db-file already exists, no needs to ingest data into pmem */
+    if ((file_exists(cli_.dbfilename1().c_str()) == 0) && (file_exists(cli_.dbfilename2().c_str()) == 0)){
+      printf("[%s]: pmem db-file already exists, no needs to ingest data into pmem\n", __FUNCTION__);
+      needs_ingestion_ = false;
+    }
+    else {
+      if(cli_.base_filename() != ""){
+        Reader<NodeID_, DestID_, WeightT_, TimestampT_, invert> r(cli_.base_filename());
+        el = r.ReadFile(needs_weights_);
+      } else {
+        printf("[%s]: graph input-file not exists, abort!!!\n", __FUNCTION__);
+        exit(0);
+      }
 
+      base_graph_num_edges_ = el.size();
+      num_nodes_ = FindMaxNodeID(el) + 1;
+
+      if (symmetrize_) {
+        for (int i = 0; i < base_graph_num_edges_; i += 1) {
+          el.push_back(EdgePair<NodeID_, DestID_>(static_cast<NodeID_>(el[i].v), GetSource(el[i])));
+        }
+        base_graph_num_edges_ *= 2;
+      }
+
+      std::sort(el.begin(), el.end(), [](Edge &a, Edge &b) {
+        return a.u < b.u;
+      });
+    }
+    #else
     /* pmem db-file already exists, no needs to ingest data into pmem */
     if (file_exists(cli_.dbfilename().c_str()) == 0) {
       printf("[%s]: pmem db-file already exists, no needs to ingest data into pmem\n", __FUNCTION__);
@@ -104,9 +133,8 @@ class BuilderBase {
         return a.u < b.u;
       });
     }
-
-    CSRGraph<NodeID_, DestID_, invert> g(cli_.dbfilename().c_str(), cli_.dbfilename().c_str(), el, !symmetrize_, base_graph_num_edges_, num_nodes_);
-
+    #endif
+    CSRGraph<NodeID_, DestID_, invert> g(cli_.dbfilename1().c_str(), cli_.dbfilename2().c_str(), el, !symmetrize_, base_graph_num_edges_, num_nodes_);
     if(needs_ingestion_) {
       el.clear();
 
@@ -134,9 +162,9 @@ class BuilderBase {
       t.Stop();
       cout << "D-Graph Build Time: " << t.Seconds() << " seconds." << endl;
     }
-
     return g;
   }
+
 };
 
 #endif  // BUILDER_H_
