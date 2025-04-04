@@ -1,6 +1,6 @@
 # See LICENSE.txt for license details.
 
-CXX_FLAGS += -std=c++11 -g -rdynamic -O3 -Wall -g -DNUMA_PMEM
+CXX_FLAGS += -std=c++11 -g -rdynamic -O0 -Wall -g -DNUMA_PMEM
 LDLIBS = -lpmemobj -lpmem
 PAR_FLAG = -fopenmp
 

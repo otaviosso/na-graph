@@ -41,7 +41,7 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
 
   scores = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
   outgoing_contrib = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
-
+  printf("entrou corretamente\n");
   #pragma omp parallel for
   for (NodeID n=0; n < g.num_nodes(); n++) scores[n] = init_score;
 
@@ -53,8 +53,9 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
     #pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
     for (NodeID u=0; u < g.num_nodes(); u++) {
       ScoreT incoming_total = 0;
-      for (NodeID v : g.in_neigh(u))
+      for (NodeID v : g.in_neigh(u)){
         incoming_total += outgoing_contrib[v];
+      }
       ScoreT old_score = scores[u];
       scores[u] = base_score + kDamp * incoming_total;
       error += fabs(scores[u] - old_score);
@@ -107,6 +108,7 @@ int run_dgap_pagerank(int argc, char* argv[]) {
     return -1;
   WeightedBuilder b(cli);
   WGraph g = b.MakeGraph();
+
 //  g.print_pma_meta();
   auto PRBound = [&cli] (const WGraph &g) {
     return PageRankPull(g, cli.max_iters(), cli.tolerance());
@@ -125,6 +127,7 @@ int main(int argc, char* argv[]) {
     return -1;
   WeightedBuilder b(cli);
   WGraph g = b.MakeGraph();
+  printf("deu certo criar grafo\n");
 //  g.print_pma_meta();
   auto PRBound = [&cli] (const WGraph &g) {
     return PageRankPull(g, cli.max_iters(), cli.tolerance());

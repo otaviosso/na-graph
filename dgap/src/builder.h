@@ -151,6 +151,8 @@ class BuilderBase {
 //      g.print_pma_meta();
 
 //      #pragma omp parallel for
+      
+      //g.print_vertices();
       #pragma omp parallel for schedule(dynamic, 1048576)   // 1024 * 1024
       for (uint64_t i = 0; i < dynamic_edges; i += 1) {
         g.insert(el[i].u, el[i].v.v);
@@ -162,6 +164,7 @@ class BuilderBase {
       t.Stop();
       cout << "D-Graph Build Time: " << t.Seconds() << " seconds." << endl;
     }
+    g.print_vertices();
     return g;
   }
 
