@@ -2507,51 +2507,55 @@ inline void insert_into_log(int32_t segment_id, int32_t src, int32_t dst) {
   /// Here, end_vertex is excluded, and start_vertex is expected to be 0
   #ifdef NUMA_PMEM
   void spread_weighted(int32_t start_vertex, int32_t end_vertex) {
-    // gaps calculado para ambas as partições
-    int64_t gaps = (elem_capacity0 + elem_capacity1) - (n_edges_node0 + n_edges_node1);
-    int64_t *new_positions = calculate_positions(start_vertex, end_vertex, gaps, (n_edges_node0 + n_edges_node1));
-    
+    assert(start_vertex == 0 && "start-vertex is expected to be 0 here.");
+    int64_t gaps = elem_capacity - num_edges_;
+    int64_t *new_positions = calculate_positions(start_vertex, end_vertex, gaps, num_edges_);
+
     int64_t read_index, write_index, curr_degree;
-    for (int32_t curr_vertex = end_vertex - 1; curr_vertex > start_vertex; curr_vertex--) {
-      if (curr_vertex < n_vertices_node0) {
-        // Nó 0: índices globais
+    for (int32_t curr_vertex = end_vertex - 1; curr_vertex > start_vertex; curr_vertex -= 1) {
+      if(curr_vertex < n_vertices_node0){
         curr_degree = vertices_0[curr_vertex].degree;
         read_index = vertices_0[curr_vertex].index + curr_degree - 1;
         write_index = new_positions[curr_vertex] + curr_degree - 1;
+
         if (write_index < read_index) {
-          cout << "current-vertex: " << curr_vertex << ", read: " << read_index
-               << ", write: " << write_index << ", degree: " << curr_degree << endl;
+          cout << "current-vertex: " << curr_vertex << ", read: " << read_index << ", write: " << write_index
+              << ", degree: " << curr_degree << endl;
         }
         assert(write_index >= read_index && "index anomaly occurred while spreading elements");
-        
+
         for (int i = 0; i < curr_degree; i++) {
           edges_0[write_index] = edges_0[read_index];
           write_index--;
           read_index--;
         }
+
         vertices_0[curr_vertex].index = new_positions[curr_vertex];
-      } else {
-        // Nó 1: converte para índice local
-        int32_t local_index = curr_vertex - n_vertices_node0;
-        curr_degree = vertices_1[local_index].degree;
-        read_index = vertices_1[local_index].index + curr_degree - 1;
-        // new_positions foi calculado com índices globais; usamos curr_vertex para acessar a nova posição
-        write_index = new_positions[curr_vertex] + curr_degree - 1;
-        if (write_index < read_index) {
-          cout << "current-vertex: " << curr_vertex << ", read: " << read_index
-               << ", write: " << write_index << ", degree: " << curr_degree << endl;
+
         }
-        assert(write_index >= read_index && "index anomaly occurred while spreading elements");
-        
-        for (int i = 0; i < curr_degree; i++) {
-          edges_1[write_index] = edges_1[read_index];
-          write_index--;
-          read_index--;
-        }
-        vertices_1[local_index].index = new_positions[curr_vertex];
-      }
+        else{
+          curr_degree = vertices_1[curr_vertex - n_vertices_node0].degree;
+          read_index = vertices_1[curr_vertex - n_vertices_node0].index + curr_degree - 1;
+          write_index = new_positions[curr_vertex] + curr_degree - 1;
+  
+          if (write_index < read_index) {
+            cout << "current-vertex: " << curr_vertex << ", read: " << read_index << ", write: " << write_index
+                << ", degree: " << curr_degree << endl;
+          }
+          assert(write_index >= read_index && "index anomaly occurred while spreading elements");
+  
+          for (int i = 0; i < curr_degree; i++) {
+            edges_1[write_index] = edges_1[read_index];
+            write_index--;
+            read_index--;
+          }
+  
+          vertices_1[curr_vertex - n_vertices_node0].index = new_positions[curr_vertex];
+  
+          }
     }
-    
+
+    // note: we do not need to flush the data in PMEM from here, it is managed from the caller function
     free(new_positions);
     new_positions = nullptr;
     recount_segment_total();
