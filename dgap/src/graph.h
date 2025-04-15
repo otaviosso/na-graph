@@ -506,11 +506,11 @@ public:
       num_vertices = n_vertices;
       max_valid_vertex_id = n_vertices;
       directed_ = is_directed;
-      n_vertices_node0 = n_vertices / 2;
-      n_vertices_node1 = n_vertices - n_vertices_node0;
+      compute_capacity();
+      n_vertices_node0 = num_vertices / 2;
+      n_vertices_node1 = num_vertices - n_vertices_node0;
       n_edges_node0 = n_edges / 2;     // Exemplo: partição igual para as aresta
       n_edges_node1 = n_edges - n_edges_node0;
-      compute_capacity();
       elem_capacity0 = elem_capacity /2;
       elem_capacity1 = elem_capacity - elem_capacity0;
       segment_count0 = segment_count/2; //Depois do compute_capacity
@@ -676,7 +676,7 @@ public:
       oplog_ptr_ = (int64_t *) pmemobj_direct(bp0->oplog_oid_);
       for(int i = 0;i<(segment_count * 2); i++){
         for(int j = 0;j<(segment_count * 2); j++){
-          printf("Index do log_ptr: %d\n", log_ptr_[i][j].prev_offset);
+          //printf("Index do log_ptr: %d\n", log_ptr_[i][j].prev_offset);
           log_ptr_[i][j].prev_offset = -1;
         }
       }
@@ -1303,7 +1303,7 @@ int64_t in_degree(NodeID_ v) const {
     if (!directed_)
       std::cout << "un";
     std::cout << "directed edges for degree: ";
-    std::cout << num_edges_ / num_vertices << std::endl;
+    std::cout << (n_edges_node0 + n_edges_node1) / (n_vertices_node0 + n_vertices_node1) << std::endl;
   }
 
   void PrintTopology() const {
@@ -1783,23 +1783,35 @@ int64_t in_degree(NodeID_ v) const {
     int32_t j;
     int64_t next_starter;
     int64_t segment_total_p;
+    int64_t aux;
     for (int i = 0; i < segment_count; i++) {
-        // Determina o índice inicial do próximo segmento ou usa elem_capacity para o último.
-        if(i < n_vertices_node0){
-          next_starter = (i == segment_count - 1) ? elem_capacity : vertices_0[(i + 1) * segment_size].index;
-          segment_total_p = next_starter - vertices_0[i * segment_size].index;
-          // Armazena o total para a folha correspondente (segmento da árvore).
-          j = i + segment_count0;  // índice na parte das folhas da árvore
-
+      // Determina o índice inicial do próximo segmento ou usa elem_capacity para o último.
+      if(i == segment_count - 1){
+        next_starter = elem_capacity;
+      }
+      else{
+        aux = (i + 1) * segment_size;
+        if(aux < n_vertices_node0){
+          next_starter = vertices_0[aux].index;
         }
         else{
-          next_starter = (i == segment_count - 1) ? elem_capacity : vertices_1[(i + 1 - n_vertices_node0) * segment_size].index;
-          segment_total_p = next_starter - vertices_1[(i - n_vertices_node0) * segment_size].index;
-          // Armazena o total para a folha correspondente (segmento da árvore).
-          j = i + segment_count1;  // índice na parte das folhas da árvore
+          next_starter = vertices_1[aux - n_vertices_node0].index;
         }
+      }
         
-        segment_edges_total[j] = segment_total_p;
+      if((i * segment_size) < n_vertices_node0){
+        segment_total_p = next_starter - vertices_0[i * segment_size].index;
+        // Armazena o total para a folha correspondente (segmento da árvore).
+        j = i + segment_count0;  // índice na parte das folhas da árvore
+
+      }
+      else{
+        segment_total_p = next_starter - vertices_1[(i * segment_size) - n_vertices_node0].index;
+        // Armazena o total para a folha correspondente (segmento da árvore).
+        j = i + segment_count1;  // índice na parte das folhas da árvore
+      }
+        
+      segment_edges_total[j] = segment_total_p;
     }
 }
 
@@ -1966,7 +1978,7 @@ void recount_segment_total(int32_t start_vertex, int32_t end_vertex) {
     n_edges_node0 += n_vertices_node0;
     n_edges_node1 += n_vertices_node1;
     // Chamadas de pós-processamento e flush para cada partição
-    print_vertices();
+    //print_vertices();
     spread_weighted(0, (n_vertices_node0 + n_vertices_node1 + 1)); 
     //spread_weighted(n_vertices_node0, (n_vertices_node0 + n_vertices_node1)); 
     flush_clwb_nolog(edges_0, sizeof(DestID_) * elem_capacity0);
@@ -2145,7 +2157,7 @@ void recount_segment_total(int32_t start_vertex, int32_t end_vertex) {
       ul.unlock();
     }
     printf("Depois do resize\n");
-    print_vertices();
+    //print_vertices();
   }
 
   // Função de inserção interna: insere a aresta em PMEM ou no log se necessário
@@ -2755,9 +2767,6 @@ inline void insert_into_log(int32_t segment_id, int32_t src, int32_t dst) {
           }
           free(new_index0);
           free(new_index1);
-      }
-      for(int i = 0; i<size; i++){
-        printf("New index[%d] = %d\n", i,new_index[i]);
       }
       return new_index;
   }

@@ -170,6 +170,7 @@ class BuilderBase {
     g.print_vertices();
     printf("terminou inserção dinamica\n");
     */
+    //g.print_vertices();
     return g;
   }
 
