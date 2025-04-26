@@ -1911,106 +1911,117 @@ void recount_segment_total(int32_t start_vertex, int32_t end_vertex) {
 #endif
   #ifdef NUMA_PMEM
   void insert(const EdgeList &edge_list) {
-    // Variáveis de controle para cada partição
-    NodeID_ last_vid0 = -1, last_vid1 = -1;
+    // Contadores de posição em cada partição
     int64_t ii0 = 0, ii1 = 0;
-  
-    // Itera por todas as arestas do edge_list
-    for (int i = 0; i < num_edges_; i++) {
-      int32_t t_src = edge_list[i].u;      // vértice de origem
-      int32_t t_dst = edge_list[i].v.v;      // vértice de destino
-  
-      // Determina o id do segmento para t_src
-      int32_t seg_id = get_segment_id(t_src);
-      // Se o segmento for menor que a qnt de segmentos do nó 0, a aresta vai para o nó 0; caso contrário, nó 1.
-      if ((seg_id - segment_count) < segment_count0) {//Talvez seja <=
-        // Inserção na partição do nó 0
-        int32_t t_degree = vertices_0[t_src].degree;
-        if (t_degree == 0) {
-          if (t_src != last_vid0 + 1) {
-            for (NodeID_ vid = last_vid0 + 1; vid < t_src; vid++) {
-              edges_0[ii0].v = -vid;
-              vertices_0[vid].degree = 1;
-              vertices_0[vid].index = ii0;
-              ii0++;
-              segment_edges_actual_0[get_segment_id(vid)]++;
-            }
-          }
-          edges_0[ii0].v = -t_src;
-          vertices_0[t_src].degree = 1;
-          vertices_0[t_src].index = ii0;
-          ii0++;
-          segment_edges_actual_0[seg_id]++;
-          last_vid0 = t_src;
-        }
-        edges_0[ii0].v = t_dst;
-        ii0++;
-        vertices_0[t_src].degree++;
-        segment_edges_actual_0[seg_id]++;
-      } else {
-        // Inserção na partição do nó 1
-        // Os vértices para o nó 1 estão indexados de forma local, precisamos ajustar:
-        //int32_t local_t_src = t_src - n_vertices_node0;
-        int32_t t_degree = vertices_1[t_src - n_vertices_node0].degree;
-        // Para os segmentos do nó 1, ajustamos o id removendo a parte dos segmentos do nó 0
-        if (t_degree == 0) {
-          if (t_src  != last_vid1 + 1) {
-            for (NodeID_ vid = last_vid1 + 1; vid < t_src; vid++) {
-              edges_1[ii1].v = -(vid);
-              vertices_1[vid].degree = 1;
-              vertices_1[vid].index = ii1;
-              ii1++;
-              segment_edges_actual_1[get_segment_id(vid) - segment_count0]++;
-            }
-          }
-          edges_1[ii1].v = -t_src; // ou - (local_t_src + n_vertices_node0)
-          vertices_1[t_src - n_vertices_node0].degree = 1;
-          vertices_1[t_src - n_vertices_node0].index = ii1;
-          ii1++;
-          segment_edges_actual_1[seg_id - segment_count0]++;
-          last_vid1 = t_src;
-        }
-        edges_1[ii1].v = t_dst;
-        ii1++;
-        vertices_1[t_src - n_vertices_node0].degree++;
-        segment_edges_actual_1[seg_id - segment_count0]++;
-      }
-    } // fim do loop principal
-  
-    // Correção para vértices com grau zero em cada partição
+    // Último vértice processado em cada nó (para filler dinâmico)
+    NodeID_ last_vid0 = -1;
+    NodeID_ last_vid1 = n_vertices_node0 - 1;
+
+    // Zera graus e offsets antes de popular
     for (int i = 0; i < n_vertices_node0; i++) {
-      if (vertices_0[i].degree == 0) {
-        assert(i > last_vid0 && "Erro: vértice com grau 0 antes de last_vid0 no nó 0");
-        edges_0[ii0].v = -i;
-        vertices_0[i].degree = 1;
-        vertices_0[i].index = ii0;
+        vertices_0[i].degree = 0;
+        vertices_0[i].offset = -1;
+    }
+    for (int i = 0; i < n_vertices_node1; i++) {
+        vertices_1[i].degree = 0;
+        vertices_1[i].offset = -1;
+    }
+    // Zera contadores de arestas por segmento
+    memset(segment_edges_actual_0, 0, sizeof(segment_edges_actual_0));
+    memset(segment_edges_actual_1, 0, sizeof(segment_edges_actual_1));
+
+    // Loop principal: inserção dinâmica com filler
+    for (int i = 0; i < num_edges_; i++) {
+        NodeID_ t_src = edge_list[i].u;
+        DestID_ t_dst = edge_list[i].v.v;
+        int32_t seg_id = get_segment_id(t_src);
+
+        bool is0      = (t_src < n_vertices_node0);
+        int   local_src = is0 ? t_src : (t_src - n_vertices_node0);
+        // Referência ao grau na partição correta
+        int32_t &deg = is0
+            ? vertices_0[local_src].degree
+            : vertices_1[local_src].degree;
+
+        // Se ainda não vimos esse vértice, faz filler de sentinelas
+        if (deg == 0) {
+            NodeID_ &last_vid = is0 ? last_vid0 : last_vid1;
+            for (NodeID_ vid = last_vid + 1; vid < t_src; vid++) {
+                bool fill0    = (vid < n_vertices_node0);
+                int local_vid = fill0 ? vid : (vid - n_vertices_node0);
+                if (fill0) {
+                    edges_0[ii0].v                     = -vid;
+                    vertices_0[local_vid].degree     = 1;
+                    vertices_0[local_vid].index      = ii0;
+                    segment_edges_actual_0[get_segment_id(vid)]++;
+                    ii0++;
+                } else {
+                    edges_1[ii1].v                     = -vid;
+                    vertices_1[local_vid].degree     = 1;
+                    vertices_1[local_vid].index      = ii1;
+                    segment_edges_actual_1[get_segment_id(vid) - segment_count0]++;
+                    ii1++;
+                }
+            }
+            // Sentinela do próprio t_src
+            if (is0) {
+                edges_0[ii0].v                     = -t_src;
+                vertices_0[local_src].degree     = 1;
+                vertices_0[local_src].index      = ii0;
+                segment_edges_actual_0[seg_id]++;
+                ii0++;
+                last_vid0 = t_src;
+            } else {
+                edges_1[ii1].v                     = -t_src;
+                vertices_1[local_src].degree     = 1;
+                vertices_1[local_src].index      = ii1;
+                segment_edges_actual_1[seg_id - segment_count0]++;
+                ii1++;
+                last_vid1 = t_src;
+            }
+        }
+        // Insere a aresta real
+        if (is0) {
+            edges_0[ii0].v                     = t_dst;
+            vertices_0[local_src].degree     += 1;
+            segment_edges_actual_0[seg_id]++;
+            ii0++;
+        } else {
+            edges_1[ii1].v                     = t_dst;
+            vertices_1[local_src].degree     += 1;
+            segment_edges_actual_1[seg_id - segment_count0]++;
+            ii1++;
+        }
+    }
+
+    // Filler final para vértices restantes de grau zero
+    for (NodeID_ vid = last_vid0 + 1; vid < n_vertices_node0; vid++) {
+        edges_0[ii0].v                     = -vid;
+        vertices_0[vid].degree            = 1;
+        vertices_0[vid].index             = ii0;
+        segment_edges_actual_0[get_segment_id(vid)]++;
         ii0++;
-        segment_edges_actual_0[get_segment_id(i)]++;
-      }
-      vertices_0[i].offset = -1;
     }
-    for (int i = n_vertices_node0; i < (n_vertices_node0 + n_vertices_node1); i++) {
-      if (vertices_1[i - n_vertices_node0].degree == 0) {
-        assert((i - n_vertices_node0) > last_vid1 && "Erro: vértice com grau 0 antes de last_vid1 no nó 1");
-        edges_1[ii1].v = -(i - n_vertices_node0);
-        vertices_1[i - n_vertices_node0].degree = 1;
-        vertices_1[i - n_vertices_node0].index = ii1;
+    for (NodeID_ vid = last_vid1 + 1; vid < n_vertices_node0 + n_vertices_node1; vid++) {
+        int local_vid = vid - n_vertices_node0;
+        edges_1[ii1].v                     = -vid;
+        vertices_1[local_vid].degree      = 1;
+        vertices_1[local_vid].index       = ii1;
+        segment_edges_actual_1[get_segment_id(vid) - segment_count0]++;
         ii1++;
-        segment_edges_actual_1[get_segment_id(i) - segment_count0]++;
-      }
-      vertices_1[i - n_vertices_node0].offset = -1;
     }
-    
-    // Atualiza a contagem de arestas em cada partição (somando os vértices com grau 0)
-    n_edges_node0 += n_vertices_node0;
-    n_edges_node1 += n_vertices_node1;
-    // Chamadas de pós-processamento e flush para cada partição
-    //print_vertices();
-    spread_weighted(0, (n_vertices_node0 + n_vertices_node1)); 
-    //spread_weighted(n_vertices_node0, (n_vertices_node0 + n_vertices_node1)); 
+
+    // Atualiza contagens e capacidades
+    n_edges_node0 = ii0;
+    n_edges_node1 = ii1;
+    elem_capacity0 = ii0;
+    elem_capacity1 = ii1;
+
+    // Chama o espalhamento e flush
+    spread_weighted(0, num_vertices);
     flush_clwb_nolog(edges_0, sizeof(DestID_) * elem_capacity0);
     flush_clwb_nolog(edges_1, sizeof(DestID_) * elem_capacity1);
-  }
+}
   #else
   /// Insert base-graph. Assume all the edges of a vertex comes together (COO format).
   void insert(const EdgeList &edge_list) {
@@ -2738,7 +2749,8 @@ inline void insert_into_log(int32_t segment_id, int32_t src, int32_t dst) {
       
       // Caso 1: intervalo totalmente em nó 0
       if(end_vertex <= n_vertices_node0) {
-          int64_t index_boundary = vertices_0[end_vertex].index; // limite para nó 0
+        int64_t index_boundary = (end_vertex == n_vertices_node0)
+        ? elem_capacity0 : vertices_0[end_vertex].index;
           double index_d = vertices_0[start_vertex].index;
           for (int i = start_vertex; i < end_vertex; i++) {
               new_index[i - start_vertex] = index_d;
@@ -2751,8 +2763,8 @@ inline void insert_into_log(int32_t segment_id, int32_t src, int32_t dst) {
           int32_t local_start = start_vertex - n_vertices_node0;
           int32_t local_end = end_vertex - n_vertices_node0;
           // Se estamos no fim da partição, usamos o limite global (elem_capacity0 + elem_capacity1)
-          int64_t index_boundary = (end_vertex >= (n_vertices_node0 + n_vertices_node1)) ?
-                                  (elem_capacity0 + elem_capacity1) : vertices_1[local_end].index;
+          int64_t index_boundary = (end_vertex == n_vertices_node0 + n_vertices_node1)
+          ? (elem_capacity0 + elem_capacity1) : vertices_1[local_end].index;
           double index_d = vertices_1[local_start].index;
           for (int i = start_vertex; i < end_vertex; i++) {
               int32_t local_i = i - n_vertices_node0;
@@ -2766,7 +2778,7 @@ inline void insert_into_log(int32_t segment_id, int32_t src, int32_t dst) {
           // Parte do nó 0
           int32_t size0 = n_vertices_node0 - start_vertex;
           int64_t *new_index0 = (int64_t *) calloc(size0, sizeof(int64_t));
-          int64_t index_boundary0 = vertices_0[n_vertices_node0].index; // limite para nó 0
+          int64_t index_boundary0 = elem_capacity0; // limite para nó 0
           double index_d0 = vertices_0[start_vertex].index;
           for (int i = start_vertex; i < n_vertices_node0; i++) {
               new_index0[i - start_vertex] = index_d0;
@@ -2777,8 +2789,8 @@ inline void insert_into_log(int32_t segment_id, int32_t src, int32_t dst) {
           int32_t size1 = end_vertex - n_vertices_node0;
           int64_t *new_index1 = (int64_t *) calloc(size1, sizeof(int64_t));
           int32_t local_end = end_vertex - n_vertices_node0;
-          int64_t index_boundary1 = (end_vertex >= (n_vertices_node0 + n_vertices_node1)) ?
-                                    (elem_capacity0 + elem_capacity1) : vertices_1[local_end].index;
+          int64_t index_boundary1 = (end_vertex == n_vertices_node0 + n_vertices_node1)
+          ? (elem_capacity0 + elem_capacity1) : vertices_1[ local_end ].index;
           double index_d1 = vertices_1[0].index; // assume início da partição 1
           for (int i = 0; i < size1; i++) {
               new_index1[i] = index_d1;

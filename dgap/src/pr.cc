@@ -47,20 +47,16 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
 
   for (int iter=0; iter < max_iters; iter++) {
     double error = 0;
-    //#pragma omp parallel for
+    #pragma omp parallel for
     for (NodeID n=0; n < g.num_nodes(); n++)
       outgoing_contrib[n] = scores[n] / g.out_degree(n);
-    //#pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
-    printf("g.num_nodes: %d\n", g.num_nodes());
+    #pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
     for (NodeID u=0; u < g.num_nodes(); u++) {
       //
       ScoreT incoming_total = 0;
-      printf("u: %d\n", u);
       for (NodeID v : g.in_neigh(u)){
-        printf("v: %d\n", v);
         incoming_total += outgoing_contrib[v];
       }
-      printf("FIM\n");
       ScoreT old_score = scores[u];
       scores[u] = base_score + kDamp * incoming_total;
       error += fabs(scores[u] - old_score);
