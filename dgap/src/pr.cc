@@ -31,7 +31,7 @@ using namespace std;
 
 typedef float ScoreT;
 const float kDamp = 0.85;
-
+void PrintTopScores(const WGraph &g, const ScoreT *scores);
 ScoreT * PageRankPull(const WGraph &g, int max_iters,
                              double epsilon = 0) {
   const ScoreT init_score = 1.0f / g.num_nodes();
@@ -42,28 +42,35 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
   scores = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
   outgoing_contrib = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
   printf("entrou corretamente\n");
-  #pragma omp parallel for
+  //#pragma omp parallel for
   for (NodeID n=0; n < g.num_nodes(); n++) scores[n] = init_score;
 
   for (int iter=0; iter < max_iters; iter++) {
     double error = 0;
-    #pragma omp parallel for
+    //#pragma omp parallel for
     for (NodeID n=0; n < g.num_nodes(); n++)
       outgoing_contrib[n] = scores[n] / g.out_degree(n);
-    #pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
+    //#pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
+    printf("g.num_nodes: %d\n", g.num_nodes());
     for (NodeID u=0; u < g.num_nodes(); u++) {
+      //
       ScoreT incoming_total = 0;
+      printf("u: %d\n", u);
       for (NodeID v : g.in_neigh(u)){
+        printf("v: %d\n", v);
         incoming_total += outgoing_contrib[v];
       }
+      printf("FIM\n");
       ScoreT old_score = scores[u];
       scores[u] = base_score + kDamp * incoming_total;
       error += fabs(scores[u] - old_score);
     }
+    
 //    printf(" %2d    %lf\n", iter, error);
 //    if (error < epsilon)
 //      break;
   }
+  PrintTopScores(g, scores);
   return scores;
 }
 

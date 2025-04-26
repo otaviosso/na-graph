@@ -1240,39 +1240,66 @@ int64_t in_degree(NodeID_ v) const {
 
   #ifdef NUMA_PMEM
   Neighborhood out_neigh(NodeID_ n, OffsetT start_offset = 0) const {
-    if (n < n_vertices_node0) {
-      int32_t onseg_edges = vertices_0[n].degree;
-      int64_t next_vertex_boundary = (n >= num_vertices - 1) ? (elem_capacity - 1) : vertices_0[n + 1].index - 1;
-      if (vertices_0[n].offset != -1) onseg_edges = next_vertex_boundary - vertices_0[n].index + 1;
-      return Neighborhood(edges_0, (struct vertex_element *) (vertices_0 + n), start_offset + 1, log_ptr_[n / segment_size],
-                          onseg_edges);
-    }
-    else{
-      int32_t onseg_edges = vertices_1[n - n_vertices_node0].degree;
-      int64_t next_vertex_boundary = (n >= num_vertices - 1) ? (elem_capacity - 1) : vertices_1[(n + 1) - n_vertices_node0].index - 1;
-      if (vertices_1[n - n_vertices_node0].offset != -1) onseg_edges = next_vertex_boundary - vertices_1[n - n_vertices_node0].index + 1;
-      return Neighborhood(edges_1, (struct vertex_element *) (vertices_1 + (n - n_vertices_node0)), start_offset + 1, log_ptr_[n / segment_size],
-                          onseg_edges);
-    }
-  }
+    // índice local e qual array usar
+    bool first_node = (n < n_vertices_node0);
+    int local_idx = first_node ? n : (n - n_vertices_node0);
 
-  Neighborhood in_neigh(NodeID_ n, OffsetT start_offset = 0) const {
+    // ponteiros aos arrays particionados
+    auto   &V    = first_node ? vertices_0 : vertices_1;
+    auto   &E    = first_node ? edges_0    : edges_1;
+
+    // próximo limite de vértice
+    bool last_global      = (n == num_vertices - 1);
+    bool last_in_node0    = (first_node && local_idx == n_vertices_node0 - 1);
+    int64_t next_boundary = last_global
+        ? (elem_capacity - 1)
+        : (first_node && last_in_node0
+            ? (vertices_1[0].index - 1)          // encontra o primeiro de vertices_1
+            : (V[local_idx + 1].index - 1));     // caso “normal” dentro do mesmo array
+
+    // contagem de arestas reais neste segmento
+    int32_t onseg_edges = V[local_idx].degree;
+    if (V[local_idx].offset != -1)
+        onseg_edges = next_boundary - V[local_idx].index + 1;
+
+    return Neighborhood(
+        E,
+        /* ponteiro pro elemento */ (struct vertex_element*)(&V[local_idx]),
+        start_offset + 1,
+        log_ptr_[ n / segment_size],
+        onseg_edges
+    );
+}
+
+Neighborhood in_neigh(NodeID_ n, OffsetT start_offset = 0) const {
     static_assert(MakeInverse, "Graph inversion disabled but reading inverse");
-    if (n < n_vertices_node0) {
-      int32_t onseg_edges = vertices_0[n].degree;
-      int64_t next_vertex_boundary = (n >= num_vertices - 1) ? (elem_capacity - 1) : vertices_0[n + 1].index - 1;
-      if (vertices_0[n].offset != -1) onseg_edges = next_vertex_boundary - vertices_0[n].index + 1;
-      return Neighborhood(edges_0, (struct vertex_element *) (vertices_0 + n), start_offset + 1, log_ptr_[n / segment_size],
-                          onseg_edges);
-    }
-    else{
-      int32_t onseg_edges = vertices_1[n - n_vertices_node0].degree;
-      int64_t next_vertex_boundary = (n >= num_vertices - 1) ? (elem_capacity - 1) : vertices_1[(n + 1) - n_vertices_node0].index - 1;
-      if (vertices_1[n - n_vertices_node0].offset != -1) onseg_edges = next_vertex_boundary - vertices_1[n - n_vertices_node0].index + 1;
-      return Neighborhood(edges_1, (struct vertex_element *) (vertices_1 + (n - n_vertices_node0)), start_offset + 1, log_ptr_[n / segment_size],
-                          onseg_edges);
-    }
-  }
+    // mesma lógica acima
+    bool first_node = (n < n_vertices_node0);
+    int local_idx = first_node ? n : (n - n_vertices_node0);
+    auto   &V    = first_node ? vertices_0 : vertices_1;
+    auto   &E    = first_node ? edges_0    : edges_1;
+
+    bool last_global      = (n == num_vertices - 1);
+    bool last_in_node0    = (first_node && local_idx == n_vertices_node0 - 1);
+    int64_t next_boundary = last_global
+        ? (elem_capacity - 1)
+        : (first_node && last_in_node0
+            ? (vertices_1[0].index - 1)
+            : (V[local_idx + 1].index - 1));
+
+    int32_t onseg_edges = V[local_idx].degree;
+    if (V[local_idx].offset != -1)
+        onseg_edges = next_boundary - V[local_idx].index + 1;
+
+    return Neighborhood(
+        E,
+        (struct vertex_element*)(&V[local_idx]),
+        start_offset + 1,
+        log_ptr_[ n / segment_size],
+        onseg_edges
+    );
+}
+
   #else
   Neighborhood out_neigh(NodeID_ n, OffsetT start_offset = 0) const {
     int32_t onseg_edges = vertices_[n].degree;
@@ -1979,7 +2006,7 @@ void recount_segment_total(int32_t start_vertex, int32_t end_vertex) {
     n_edges_node1 += n_vertices_node1;
     // Chamadas de pós-processamento e flush para cada partição
     //print_vertices();
-    spread_weighted(0, (n_vertices_node0 + n_vertices_node1 + 1)); 
+    spread_weighted(0, (n_vertices_node0 + n_vertices_node1)); 
     //spread_weighted(n_vertices_node0, (n_vertices_node0 + n_vertices_node1)); 
     flush_clwb_nolog(edges_0, sizeof(DestID_) * elem_capacity0);
     flush_clwb_nolog(edges_1, sizeof(DestID_) * elem_capacity1);
@@ -2520,8 +2547,8 @@ inline void insert_into_log(int32_t segment_id, int32_t src, int32_t dst) {
   #ifdef NUMA_PMEM
   void spread_weighted(int32_t start_vertex, int32_t end_vertex) {
     assert(start_vertex == 0 && "start-vertex is expected to be 0 here.");
-    int64_t gaps = elem_capacity - num_edges_;
-    int64_t *new_positions = calculate_positions(start_vertex, end_vertex, gaps, num_edges_);
+    int64_t gaps = elem_capacity - (n_edges_node1 + n_edges_node0);
+    int64_t *new_positions = calculate_positions(start_vertex, end_vertex, gaps, (n_edges_node1 + n_edges_node0));
 
     int64_t read_index, write_index, curr_degree;
     for (int32_t curr_vertex = end_vertex - 1; curr_vertex > start_vertex; curr_vertex -= 1) {
