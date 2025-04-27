@@ -33,63 +33,76 @@ typedef float ScoreT;
 const float kDamp = 0.85;
 void PrintTopScores(const WGraph &g, const ScoreT *scores);
 void bind_current_thread_to_cpu_list(const std::vector<int> &cpus);
-ScoreT * PageRankPull(const WGraph &g, int max_iters,
-                             double epsilon = 0) {
-  const ScoreT init_score = 1.0f / g.num_nodes();
-  const ScoreT base_score = (1.0f - kDamp) / g.num_nodes();
-  ScoreT *scores;
-  ScoreT *outgoing_contrib;
-  int64_t vertices0 = g.num_nodes()/2;
 
-  scores = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
-  outgoing_contrib = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
-  //printf("entrou corretamente\n");
-  //#pragma omp parallel for
-  for (NodeID n=0; n < g.num_nodes(); n++) scores[n] = init_score;
+ScoreT *PageRankPull(const WGraph &g, int max_iters, double epsilon = 0) {
+  const int64_t N          = g.num_nodes();
+  const ScoreT  init_score = 1.0f / N;
+  const ScoreT  base_score = (1.0f - kDamp) / N;
+  ScoreT       *scores     = (ScoreT*)malloc(sizeof(ScoreT)*N);
+  ScoreT       *outgoing   = (ScoreT*)malloc(sizeof(ScoreT)*N);
+  int64_t       vertices0  = N/2;
 
-  for (int iter=0; iter < max_iters; iter++) {
-    double error = 0;
-    #pragma omp parallel
-    {//Dividindo manualmente o espaço processado pelo PageRank
-      int start, end;
-      int tid = omp_get_thread_num();
-      int numThreads = omp_get_num_threads();
-      int n0 = (numThreads/2);
-      int n1 = numThreads - n0;
-      if (tid < (numThreads/2)) {//Metade para cada nó, aqui divide quem vai processar quem
-        bind_current_thread_to_cpu_list({0,1,2,3,4,5,6,7,8,9,10,11,24,25,26,27,28,29,30,31,32,33,34,35});//Node 0
-        int chunk = (vertices0 + n0-1)/n0; //Forma para dividir em tamanho iguais o processamento para cada Thread, baseado no XPGraph
-        start = tid * chunk; /*Define em qual parte o Thread vai começar
-        basicamente começa em (u + a parte processada por outros Threads) e termina em (u + a parte dele)*/
-        end   = min<int64_t>(vertices0, start + chunk); //Até onde ele processa
-      } else {
-          bind_current_thread_to_cpu_list({12,13,14,15,16,17,18,19,20,21,22,23,36,37,38,39,40,41,42,43,44,45,46,47});//Depois deixo mais bonito
-          int tid1  = tid - n0;
-          int rem   = g.num_nodes() - vertices0;
-          int chunk = (rem + n1-1)/n1;
-          start = vertices0 + tid1 * chunk;
-          end   = min<int64_t>(g.num_nodes(), start + chunk);
-      }
-      ScoreT local_error = 0;
-      for (NodeID n=start; n < end; n++){
-        outgoing_contrib[n] = scores[n] / g.out_degree(n);
-      }
-      for (NodeID u=start; u < end; u++) {
-        ScoreT incoming_total = 0;
-        for (NodeID v : g.in_neigh(u)){
-          incoming_total += outgoing_contrib[v];
-        }
-        ScoreT old_score = scores[u];
-        scores[u] = base_score + kDamp * incoming_total;
-        local_error += fabs(scores[u] - old_score); //Basicamente o que o omp fazia antes
-      }
-      #pragma omp atomic
-      error += local_error; //Tomar cuidado para não calcular errado
+  // inicializa
+  for (int64_t i = 0; i < N; ++i)
+    scores[i] = init_score;
+
+  double error = 0.0;
+
+  #pragma omp parallel
+  {
+    // Bind uma única vez por thread
+    int tid        = omp_get_thread_num();
+    int numThreads = omp_get_num_threads();
+    int n0         = numThreads/2;
+
+    static const std::vector<int> node0_cpus = {
+       0,1,2,3,4,5,6,7,8,9,10,11,
+      24,25,26,27,28,29,30,31,32,33,34,35
+    };
+    static const std::vector<int> node1_cpus = {
+      12,13,14,15,16,17,18,19,20,21,22,23,
+      36,37,38,39,40,41,42,43,44,45,46,47
+    };
+    int64_t start, end;
+    if (tid < n0){
+      bind_current_thread_to_cpu_list(node0_cpus);
+      int64_t chunk = (vertices0 + n0 - 1) / n0;
+      start = tid * chunk;
+      end   = std::min<int64_t>(vertices0, start + chunk);
     }
-  }
-  //PrintTopScores(g, scores);
+    else{
+      bind_current_thread_to_cpu_list(node1_cpus);
+      int   tid1 = tid - n0;
+      int64_t rem   = N - vertices0;
+      int64_t chunk = (rem + (numThreads-n0) - 1) / (numThreads-n0);
+      start = vertices0 + tid1 * chunk;
+      end   = std::min<int64_t>(N, start + chunk);
+    }
+    // loop -> reusa start/end sem recalcular
+    for (int iter = 0; iter < max_iters; ++iter) {
+      ScoreT local_err = 0;
+
+      for (int64_t u = start; u < end; ++u) //Utiliza o intervalo criado
+        outgoing[u] = scores[u] / g.out_degree(u);
+
+      // Pagerank em si, também utiliza o itervalo criado
+      for (int64_t u = start; u < end; ++u) {
+        ScoreT sum = 0;
+        for (auto v : g.in_neigh(u))
+          sum += outgoing[v];
+        ScoreT old = scores[u];
+        scores[u] = base_score + kDamp * sum;
+        local_err += fabs(scores[u] - old);
+      }
+
+      #pragma omp atomic
+      error += local_err;
+    }
+  } // fim do parallel
+
   return scores;
 }
+
 
 void bind_current_thread_to_cpu_list(const std::vector<int> &cpus) {
   cpu_set_t cpuset;
