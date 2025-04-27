@@ -38,6 +38,7 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
   const ScoreT base_score = (1.0f - kDamp) / g.num_nodes();
   ScoreT *scores;
   ScoreT *outgoing_contrib;
+  int64_t vertices0 = g.num_nodes()/2;
 
   scores = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
   outgoing_contrib = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
@@ -52,7 +53,12 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
       outgoing_contrib[n] = scores[n] / g.out_degree(n);
     #pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
     for (NodeID u=0; u < g.num_nodes(); u++) {
-      //
+      if(u < vertices0){
+        bind_current_thread_to_cpu_list({0,1,2,3,4,5,6,7,8,9,10,11,24,25,26,27,28,29,30,31,32,33,34,35});
+      }
+      else{
+        bind_current_thread_to_cpu_list({12,13,14,15,16,17,18,19,20,21,22,23,36,37,38,39,40,41,42,43,44,45,46,47});//Depois deixo mais bonito
+      }
       ScoreT incoming_total = 0;
       for (NodeID v : g.in_neigh(u)){
         incoming_total += outgoing_contrib[v];
@@ -68,6 +74,16 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
   }
   //PrintTopScores(g, scores);
   return scores;
+}
+
+void bind_current_thread_to_cpu_list(const std::vector<int> &cpus) {
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  for (int cpu : cpus) {
+      CPU_SET(cpu, &cpuset);
+  }
+  pthread_t tid = pthread_self();
+  pthread_setaffinity_np(tid, sizeof(cpu_set_t), &cpuset);
 }
 
 
