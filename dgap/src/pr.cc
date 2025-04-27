@@ -41,7 +41,7 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
 
   scores = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
   outgoing_contrib = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
-  printf("entrou corretamente\n");
+  //printf("entrou corretamente\n");
   //#pragma omp parallel for
   for (NodeID n=0; n < g.num_nodes(); n++) scores[n] = init_score;
 
@@ -66,7 +66,7 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
 //    if (error < epsilon)
 //      break;
   }
-  PrintTopScores(g, scores);
+  //PrintTopScores(g, scores);
   return scores;
 }
 

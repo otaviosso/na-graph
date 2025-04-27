@@ -18,7 +18,7 @@
 #include <cstring>
 #include <omp.h>
 #include <climits>
-
+#include <numa.h>
 #include <fstream>
 #include <string>
 
@@ -640,10 +640,12 @@ public:
       //edges_ = (DestID_ *) pmemobj_direct(bp->edges_oid_);
       edges_0 = (DestID_ *) pmemobj_direct(bp0->edges_oid_);
       edges_1 = (DestID_ *) pmemobj_direct(bp1->edges_oid_);
-      vertices_0 = (struct vertex_element *) malloc(n_vertices_node0 * sizeof(struct vertex_element));
+      //vertices_0 = (struct vertex_element *) malloc(n_vertices_node0 * sizeof(struct vertex_element));
+      vertices_0 = (vertex_element*)numa_alloc_onnode(n_vertices_node0 * sizeof(vertex_element),/* node */ 0); //Alocando no nó 0
       memcpy(vertices_0, (struct vertex_element *) pmemobj_direct(bp0->vertices_oid_), n_vertices_node0 * sizeof(struct vertex_element));
 
-      vertices_1 = (struct vertex_element *) malloc(n_vertices_node1 * sizeof(struct vertex_element));
+      vertices_1 = (vertex_element*)numa_alloc_onnode(n_vertices_node1 * sizeof(vertex_element), /* node */ 1);
+      //vertices_1 = (struct vertex_element *) malloc(n_vertices_node1 * sizeof(struct vertex_element));
       memcpy(vertices_1, (struct vertex_element *) pmemobj_direct(bp1->vertices_oid_), n_vertices_node1 * sizeof(struct vertex_element));
       /*
       struct LogEntry *log_base_ptr_0;
