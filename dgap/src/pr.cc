@@ -49,29 +49,43 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
 
   for (int iter=0; iter < max_iters; iter++) {
     double error = 0;
-    #pragma omp parallel for
-    for (NodeID n=0; n < g.num_nodes(); n++)
-      outgoing_contrib[n] = scores[n] / g.out_degree(n);
-    #pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
-    for (NodeID u=0; u < g.num_nodes(); u++) {
-      if(u < vertices0){
-        bind_current_thread_to_cpu_list({0,1,2,3,4,5,6,7,8,9,10,11,24,25,26,27,28,29,30,31,32,33,34,35});
+    #pragma omp parallel
+    {//Dividindo manualmente o espaço processado pelo PageRank
+      int start, end;
+      int tid = omp_get_thread_num();
+      int numThreads = omp_get_num_threads();
+      int n0 = (numThreads/2);
+      int n1 = numThreads - n0;
+      if (tid < (numThreads/2)) {//Metade para cada nó, aqui divide quem vai processar quem
+        bind_current_thread_to_cpu_list({0,1,2,3,4,5,6,7,8,9,10,11,24,25,26,27,28,29,30,31,32,33,34,35});//Node 0
+        int chunk = (vertices0 + n0-1)/n0; //Forma para dividir em tamanho iguais o processamento para cada Thread, baseado no XPGraph
+        start = tid * chunk; /*Define em qual parte o Thread vai começar
+        basicamente começa em (u + a parte processada por outros Threads) e termina em (u + a parte dele)*/
+        end   = min<int64_t>(vertices0, start + chunk); //Até onde ele processa
+      } else {
+          bind_current_thread_to_cpu_list({12,13,14,15,16,17,18,19,20,21,22,23,36,37,38,39,40,41,42,43,44,45,46,47});//Depois deixo mais bonito
+          int tid1  = tid - n0;
+          int rem   = g.num_nodes() - vertices0;
+          int chunk = (rem + n1-1)/n1;
+          start = vertices0 + tid1 * chunk;
+          end   = min<int64_t>(g.num_nodes(), start + chunk);
       }
-      else{
-        bind_current_thread_to_cpu_list({12,13,14,15,16,17,18,19,20,21,22,23,36,37,38,39,40,41,42,43,44,45,46,47});//Depois deixo mais bonito
+      ScoreT local_error = 0;
+      for (NodeID n=start; n < end; n++){
+        outgoing_contrib[n] = scores[n] / g.out_degree(n);
       }
-      ScoreT incoming_total = 0;
-      for (NodeID v : g.in_neigh(u)){
-        incoming_total += outgoing_contrib[v];
+      for (NodeID u=start; u < end; u++) {
+        ScoreT incoming_total = 0;
+        for (NodeID v : g.in_neigh(u)){
+          incoming_total += outgoing_contrib[v];
+        }
+        ScoreT old_score = scores[u];
+        scores[u] = base_score + kDamp * incoming_total;
+        local_error += fabs(scores[u] - old_score); //Basicamente o que o omp fazia antes
       }
-      ScoreT old_score = scores[u];
-      scores[u] = base_score + kDamp * incoming_total;
-      error += fabs(scores[u] - old_score);
+      #pragma omp atomic
+      error += local_error; //Tomar cuidado para não calcular errado
     }
-    
-//    printf(" %2d    %lf\n", iter, error);
-//    if (error < epsilon)
-//      break;
   }
   //PrintTopScores(g, scores);
   return scores;
