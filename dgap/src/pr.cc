@@ -32,6 +32,7 @@ using namespace std;
 typedef float ScoreT;
 const float kDamp = 0.85;
 void PrintTopScores(const WGraph &g, const ScoreT *scores);
+void bind_current_thread_to_cpu_list(const std::vector<int> &cpus);
 ScoreT * PageRankPull(const WGraph &g, int max_iters,
                              double epsilon = 0) {
   const ScoreT init_score = 1.0f / g.num_nodes();
