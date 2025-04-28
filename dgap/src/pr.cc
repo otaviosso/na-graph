@@ -101,41 +101,40 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
 
 ScoreT * PageRankPull(const WGraph &g, int max_iters,
   double epsilon = 0) {
-const ScoreT init_score = 1.0f / g.num_nodes();
-const ScoreT base_score = (1.0f - kDamp) / g.num_nodes();
-ScoreT *scores;
-ScoreT *outgoing_contrib;
+  const ScoreT init_score = 1.0f / g.num_nodes();
+  const ScoreT base_score = (1.0f - kDamp) / g.num_nodes();
+  ScoreT *scores;
+  ScoreT *outgoing_contrib;
 
-scores = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
-outgoing_contrib = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
+  scores = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
+  outgoing_contrib = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
 
-#pragma omp parallel for
-for (NodeID n=0; n < g.num_nodes(); n++) scores[n] = init_score;
+  #pragma omp parallel for
+  for (NodeID n=0; n < g.num_nodes(); n++) scores[n] = init_score;
 
-for (int iter=0; iter < max_iters; iter++) {
-double error = 0;
-#pragma omp parallel for
-for (NodeID n=0; n < g.num_nodes(); n++)
-outgoing_contrib[n] = scores[n] / g.out_degree(n);
-#pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
-for (NodeID u=0; u < g.num_nodes(); u++) {
-ScoreT incoming_total = 0;
-for (NodeID v : g.in_neigh(u)){
-printf("v: %d\n", v);
-incoming_total += outgoing_contrib[v];
-}
-printf("FIM\n");
+  for (int iter=0; iter < max_iters; iter++) {
+    double error = 0;
+    #pragma omp parallel for
+    for (NodeID n=0; n < g.num_nodes(); n++)
+    outgoing_contrib[n] = scores[n] / g.out_degree(n);
+    #pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
+    for (NodeID u=0; u < g.num_nodes(); u++) {
+      ScoreT incoming_total = 0;
+      for (NodeID v : g.in_neigh(u)){
+        incoming_total += outgoing_contrib[v];
+      }
 
-ScoreT old_score = scores[u];
-scores[u] = base_score + kDamp * incoming_total;
-error += fabs(scores[u] - old_score);
-}
-//    printf(" %2d    %lf\n", iter, error);
-//    if (error < epsilon)
-//      break;
-}
-PrintTopScores(g, scores);
-return scores;
+
+      ScoreT old_score = scores[u];
+      scores[u] = base_score + kDamp * incoming_total;
+      error += fabs(scores[u] - old_score);
+    }
+    //    printf(" %2d    %lf\n", iter, error);
+    //    if (error < epsilon)
+    //      break;
+  }
+  PrintTopScores(g, scores);
+  return scores;
 }
 
 
@@ -194,12 +193,12 @@ int main(int argc, char* argv[]) {
 //  g.print_pma_meta();
 if(omp_get_max_threads() > 1){
   PRBound = [&cli] (const WGraph &g) {
-    return PageRankPull(g, cli.max_iters(), cli.tolerance());
+    return PageRankPullNuma(g, cli.max_iters(), cli.tolerance());
   };
 }
 else{
   PRBound = [&cli] (const WGraph &g) {
-    return PageRankPullNuma(g, cli.max_iters(), cli.tolerance());
+    return PageRankPull(g, cli.max_iters(), cli.tolerance());
   };
 }
   
