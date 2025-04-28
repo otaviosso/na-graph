@@ -79,11 +79,13 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
       end   = std::min<int64_t>(num_nodes, start + chunk);
     }
     for (int iter = 0; iter < max_iters; ++iter) {
+      #pragma omp parallel for
       for (int64_t u = start; u < end; ++u) //Utiliza o intervalo criado
         outgoing[u] = scores[u] / g.out_degree(u);
 
       #pragma omp barrier
       // Pagerank em si, também utiliza o itervalo criado
+      
       for (int64_t u = start; u < end; ++u) {
         ScoreT sum = 0;
         for (auto v : g.in_neigh(u))

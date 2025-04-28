@@ -302,11 +302,11 @@ class CSRGraph {
   };
   #ifdef NUMA_PMEM
   void ReleaseResources() {
-    if (vertices_0 != nullptr) free(vertices_0);
-    if (vertices_1 != nullptr) free(vertices_1);
+    if (vertices_0 != nullptr) numa_free(vertices_0, n_vertices_node0 * sizeof(vertex_element));
+    if (vertices_1 != nullptr) numa_free(vertices_1, n_vertices_node1 * sizeof(vertex_element));
     if (log_ptr_ != nullptr) free(log_ptr_);
-    if (log_segment_idx_0 != nullptr) free(log_segment_idx_0);
-    if (log_segment_idx_1 != nullptr) free(log_segment_idx_1);
+    //if (log_segment_idx_0 != nullptr) free(log_segment_idx_0);
+    //if (log_segment_idx_1 != nullptr) free(log_segment_idx_1);
     if (segment_edges_actual != nullptr) free(segment_edges_actual);
     if (segment_edges_total != nullptr) free(segment_edges_total);
   }
