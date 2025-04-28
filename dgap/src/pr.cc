@@ -193,12 +193,12 @@ int main(int argc, char* argv[]) {
   std::function<ScoreT*(const WGraph&)> PRBound;
 //  g.print_pma_meta();
 if(omp_get_max_threads() > 1){
-  auto PRBound = [&cli] (const WGraph &g) {
+  PRBound = [&cli] (const WGraph &g) {
     return PageRankPull(g, cli.max_iters(), cli.tolerance());
   };
 }
 else{
-  auto PRBound = [&cli] (const WGraph &g) {
+  PRBound = [&cli] (const WGraph &g) {
     return PageRankPullNuma(g, cli.max_iters(), cli.tolerance());
   };
 }
