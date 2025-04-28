@@ -48,7 +48,7 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
 
   double error = 0.0;
 
-  #pragma omp parallel reduction(+ : error)
+  #pragma omp parallel
   {
     // Bind uma única vez por thread
     int tid        = omp_get_thread_num();
@@ -79,19 +79,17 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
       end   = std::min<int64_t>(num_nodes, start + chunk);
     }
     for (int iter = 0; iter < max_iters; ++iter) {
-
       for (int64_t u = start; u < end; ++u) //Utiliza o intervalo criado
         outgoing[u] = scores[u] / g.out_degree(u);
 
+      #pragma omp barrier
       // Pagerank em si, também utiliza o itervalo criado
-      #pragma omp for schedule(dynamic, 64) nowait
       for (int64_t u = start; u < end; ++u) {
         ScoreT sum = 0;
         for (auto v : g.in_neigh(u))
           sum += outgoing[v];
         ScoreT old = scores[u];
         scores[u] = base_score + kDamp * sum;
-        error += fabs(scores[u] - old);
       }
     }
   } // fim do parallel
@@ -116,7 +114,7 @@ ScoreT * PageRankPull(const WGraph &g, int max_iters,
     double error = 0;
     #pragma omp parallel for
     for (NodeID n=0; n < g.num_nodes(); n++)
-    outgoing_contrib[n] = scores[n] / g.out_degree(n);
+      outgoing_contrib[n] = scores[n] / g.out_degree(n);
     #pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
     for (NodeID u=0; u < g.num_nodes(); u++) {
       ScoreT incoming_total = 0;
