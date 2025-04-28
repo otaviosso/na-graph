@@ -10,7 +10,6 @@
 #include "command_line.h"
 #include "graph.h"
 #include "pvector.h"
-#include "pr.h"
 #include <omp.h>
 #include <string.h>
 /*
@@ -34,21 +33,22 @@ const float kDamp = 0.85;
 void PrintTopScores(const WGraph &g, const ScoreT *scores);
 void bind_current_thread_to_cpu_list(const std::vector<int> &cpus);
 
-ScoreT *PageRankPull(const WGraph &g, int max_iters, double epsilon = 0) {
-  const int64_t N          = g.num_nodes();
-  const ScoreT  init_score = 1.0f / N;
-  const ScoreT  base_score = (1.0f - kDamp) / N;
-  ScoreT       *scores     = (ScoreT*)malloc(sizeof(ScoreT)*N);
-  ScoreT       *outgoing   = (ScoreT*)malloc(sizeof(ScoreT)*N);
-  int64_t       vertices0  = N/2;
+ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
+  const int64_t num_nodes   = g.num_nodes();
+  const ScoreT  init_score = 1.0f / num_nodes;
+  const ScoreT  base_score = (1.0f - kDamp) / num_nodes;
+  ScoreT       *scores     = (ScoreT*)malloc(sizeof(ScoreT)*num_nodes);
+  ScoreT       *outgoing   = (ScoreT*)malloc(sizeof(ScoreT)*num_nodes);
+  int64_t       vertices0  = num_nodes/2;
 
   // inicializa
-  for (int64_t i = 0; i < N; ++i)
+  #pragma omp parallel for
+  for (int64_t i = 0; i < num_nodes; ++i)
     scores[i] = init_score;
 
   double error = 0.0;
 
-  #pragma omp parallel
+  #pragma omp parallel reduction(+ : error)
   {
     // Bind uma única vez por thread
     int tid        = omp_get_thread_num();
@@ -73,34 +73,69 @@ ScoreT *PageRankPull(const WGraph &g, int max_iters, double epsilon = 0) {
     else{
       bind_current_thread_to_cpu_list(node1_cpus);
       int   tid1 = tid - n0;
-      int64_t rem   = N - vertices0;
+      int64_t rem   = num_nodes - vertices0;
       int64_t chunk = (rem + (numThreads-n0) - 1) / (numThreads-n0);
       start = vertices0 + tid1 * chunk;
-      end   = std::min<int64_t>(N, start + chunk);
+      end   = std::min<int64_t>(num_nodes, start + chunk);
     }
-    // loop -> reusa start/end sem recalcular
     for (int iter = 0; iter < max_iters; ++iter) {
-      ScoreT local_err = 0;
 
       for (int64_t u = start; u < end; ++u) //Utiliza o intervalo criado
         outgoing[u] = scores[u] / g.out_degree(u);
 
       // Pagerank em si, também utiliza o itervalo criado
+      #pragma omp for schedule(dynamic, 64) nowait
       for (int64_t u = start; u < end; ++u) {
         ScoreT sum = 0;
         for (auto v : g.in_neigh(u))
           sum += outgoing[v];
         ScoreT old = scores[u];
         scores[u] = base_score + kDamp * sum;
-        local_err += fabs(scores[u] - old);
+        error += fabs(scores[u] - old);
       }
-
-      #pragma omp atomic
-      error += local_err;
     }
   } // fim do parallel
 
   return scores;
+}
+
+ScoreT * PageRankPull(const WGraph &g, int max_iters,
+  double epsilon = 0) {
+const ScoreT init_score = 1.0f / g.num_nodes();
+const ScoreT base_score = (1.0f - kDamp) / g.num_nodes();
+ScoreT *scores;
+ScoreT *outgoing_contrib;
+
+scores = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
+outgoing_contrib = (ScoreT *) malloc(sizeof(ScoreT) * g.num_nodes());
+
+#pragma omp parallel for
+for (NodeID n=0; n < g.num_nodes(); n++) scores[n] = init_score;
+
+for (int iter=0; iter < max_iters; iter++) {
+double error = 0;
+#pragma omp parallel for
+for (NodeID n=0; n < g.num_nodes(); n++)
+outgoing_contrib[n] = scores[n] / g.out_degree(n);
+#pragma omp parallel for reduction(+ : error) schedule(dynamic, 64)
+for (NodeID u=0; u < g.num_nodes(); u++) {
+ScoreT incoming_total = 0;
+for (NodeID v : g.in_neigh(u)){
+printf("v: %d\n", v);
+incoming_total += outgoing_contrib[v];
+}
+printf("FIM\n");
+
+ScoreT old_score = scores[u];
+scores[u] = base_score + kDamp * incoming_total;
+error += fabs(scores[u] - old_score);
+}
+//    printf(" %2d    %lf\n", iter, error);
+//    if (error < epsilon)
+//      break;
+}
+PrintTopScores(g, scores);
+return scores;
 }
 
 
@@ -148,18 +183,26 @@ bool PRVerifier(const WGraph &g, const ScoreT *scores,
   return error < target_error;
 }
 
-#ifdef nagraph
-int run_dgap_pagerank(int argc, char* argv[]) {
+#ifdef NUMA_PMEM
+int main(int argc, char* argv[]) {
   CLPageRank cli(argc, argv, "pagerank", 1e-4, 20);
   if (!cli.ParseArgs())
     return -1;
   WeightedBuilder b(cli);
   WGraph g = b.MakeGraph();
-
+  std::function<ScoreT*(const WGraph&)> PRBound;
 //  g.print_pma_meta();
+if(omp_get_max_threads() > 1){
   auto PRBound = [&cli] (const WGraph &g) {
     return PageRankPull(g, cli.max_iters(), cli.tolerance());
   };
+}
+else{
+  auto PRBound = [&cli] (const WGraph &g) {
+    return PageRankPullNuma(g, cli.max_iters(), cli.tolerance());
+  };
+}
+  
   auto VerifierBound = [&cli] (const WGraph &g, const ScoreT *scores) {
     return PRVerifier(g, scores, cli.tolerance());
   };

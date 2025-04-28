@@ -346,8 +346,8 @@ public:
     flush_clwb_nolog((struct vertex_element *) pmemobj_direct(bp1->vertices_oid_),
     n_vertices_node1 * sizeof(struct vertex_element));                
 
-    memcpy((int32_t *) pmemobj_direct(bp0->log_segment_idx_oid_), log_segment_idx_0, segment_count0 * sizeof(int32_t));
-    memcpy((int32_t *) pmemobj_direct(bp1->log_segment_idx_oid_), log_segment_idx_1, segment_count1 * sizeof(int32_t));
+    //memcpy((int32_t *) pmemobj_direct(bp0->log_segment_idx_oid_), log_segment_idx_0, segment_count0 * sizeof(int32_t));
+    //memcpy((int32_t *) pmemobj_direct(bp1->log_segment_idx_oid_), log_segment_idx_1, segment_count1 * sizeof(int32_t));
     flush_clwb_nolog((int32_t *) pmemobj_direct(bp0->log_segment_idx_oid_), segment_count0 * sizeof(int32_t));
     flush_clwb_nolog((int32_t *) pmemobj_direct(bp1->log_segment_idx_oid_), segment_count1 * sizeof(int32_t));
     
