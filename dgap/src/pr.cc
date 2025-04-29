@@ -85,7 +85,7 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
 
       #pragma omp barrier
       // Pagerank em si, também utiliza o itervalo criado
-      
+      #pragma omp for schedule(dynamic, 8000) nowait
       for (int64_t u = start; u < end; ++u) {
         ScoreT sum = 0;
         for (auto v : g.in_neigh(u))
