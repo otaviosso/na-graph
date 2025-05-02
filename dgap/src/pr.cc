@@ -47,13 +47,16 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
     scores[i] = init_score;
 
   double error = 0.0;
-
+  long int count_global = 0;
   #pragma omp parallel
   {
+
     // Bind uma única vez por thread
     int tid        = omp_get_thread_num();
     int numThreads = omp_get_num_threads();
     int n0         = numThreads/2;
+    long int my_count = 0;
+    
 
     static const std::vector<int> node0_cpus = {
        0,1,2,3,4,5,6,7,8,9,10,11,
@@ -73,27 +76,30 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
     else{
       bind_current_thread_to_cpu_list(node1_cpus);
       int   tid1 = tid - n0;
+      
       int64_t rem   = num_nodes - vertices0;
       int64_t chunk = (rem + (numThreads-n0) - 1) / (numThreads-n0);
       start = vertices0 + tid1 * chunk;
       end   = std::min<int64_t>(num_nodes, start + chunk);
     }
     for (int iter = 0; iter < max_iters; ++iter) {
-      #pragma omp parallel for
+      //#pragma omp parallel for
       for (int64_t u = start; u < end; ++u) //Utiliza o intervalo criado
         outgoing[u] = scores[u] / g.out_degree(u);
 
-      #pragma omp barrier
-      // Pagerank em si, também utiliza o itervalo criado
-      #pragma omp for schedule(dynamic, 8000) nowait
+      //#pragma omp barrier
+      // Pagerank em si, também utiliza o intervalo criado
       for (int64_t u = start; u < end; ++u) {
         ScoreT sum = 0;
-        for (auto v : g.in_neigh(u))
+        for (auto v : g.in_neigh(u)){
           sum += outgoing[v];
+          my_count++;
+        }
         ScoreT old = scores[u];
         scores[u] = base_score + kDamp * sum;
       }
     }
+    printf("TID: %d, my count: %ld\n", tid, my_count);
   } // fim do parallel
 
   return scores;

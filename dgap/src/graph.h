@@ -2018,7 +2018,7 @@ void recount_segment_total(int32_t start_vertex, int32_t end_vertex) {
     n_edges_node1 = ii1;
     elem_capacity0 = ii0;
     elem_capacity1 = ii1;
-
+    printf("Vertices node 0: %ld\nVertices node 1: %ld\nArestas node 0: %ld\nArestas node 1: %ld\n",n_vertices_node0, n_vertices_node1, n_edges_node0, n_edges_node1);
     // Chama o espalhamento e flush
     spread_weighted(0, num_vertices);
     flush_clwb_nolog(edges_0, sizeof(DestID_) * elem_capacity0);
