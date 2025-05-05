@@ -78,7 +78,7 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
     }
     for (int iter = 0; iter < max_iters; ++iter) {
       //#pragma omp parallel for
-      for (int64_t u = start; u < end; ++u) //Utiliza o intervalo criado
+      for (int64_t u = start; u < g.num_nodes(); u+=numThreads) //Utiliza o intervalo criado
         outgoing[u] = scores[u] / g.out_degree(u);
 
       //#pragma omp barrier
@@ -193,7 +193,7 @@ int main(int argc, char* argv[]) {
 //  g.print_pma_meta();
 if(omp_get_max_threads() > 1){
   PRBound = [&cli] (const WGraph &g) {
-    return PageRankPull(g, cli.max_iters(), cli.tolerance());
+    return PageRankPullNuma(g, cli.max_iters(), cli.tolerance());
   };
 }
 else{
