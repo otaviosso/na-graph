@@ -55,7 +55,8 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
     int tid        = omp_get_thread_num();
     int numThreads = omp_get_num_threads();
     int n0         = numThreads/2;
-    long int my_count = 0;
+    int node_count = 2;
+    //long int my_count = 0;
     
 
     static const std::vector<int> node0_cpus = {
@@ -67,10 +68,10 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
       36,37,38,39,40,41,42,43,44,45,46,47
     };
     int64_t start, end;
-    if (tid < n0){
+    if ((tid%node_count) == 0){// pensar na logica direito
       bind_current_thread_to_cpu_list(node0_cpus);
       int64_t chunk = (vertices0 + n0 - 1) / n0;
-      start = tid * chunk;
+      start = tid * node_count;
       end   = std::min<int64_t>(vertices0, start + chunk);
     }
     else{
@@ -93,13 +94,13 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
         ScoreT sum = 0;
         for (auto v : g.in_neigh(u)){
           sum += outgoing[v];
-          my_count++;
+          //my_count++;
         }
         ScoreT old = scores[u];
         scores[u] = base_score + kDamp * sum;
       }
     }
-    printf("TID: %d, my count: %ld\n", tid, my_count);
+    //printf("TID: %d, my count: %ld\n", tid, my_count);
   } // fim do parallel
 
   return scores;
@@ -199,7 +200,7 @@ int main(int argc, char* argv[]) {
 //  g.print_pma_meta();
 if(omp_get_max_threads() > 1){
   PRBound = [&cli] (const WGraph &g) {
-    return PageRankPullNuma(g, cli.max_iters(), cli.tolerance());
+    return PageRankPull(g, cli.max_iters(), cli.tolerance());
   };
 }
 else{
