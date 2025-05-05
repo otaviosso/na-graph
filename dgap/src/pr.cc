@@ -68,21 +68,22 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
       36,37,38,39,40,41,42,43,44,45,46,47
     };
     int64_t start;
-    if ((tid%node_count) == 0){// pensar na logica direito
+    if ((tid%node_count) == 0){
       bind_current_thread_to_cpu_list(node0_cpus);
-      start = tid;
+      start = tid; //Pares
     }
     else{
       bind_current_thread_to_cpu_list(node1_cpus);
-      start = tid;
+      start = tid;//Impares
     }
     for (int iter = 0; iter < max_iters; ++iter) {
-      //#pragma omp parallel for
-      for (int64_t u = start; u < g.num_nodes(); u+=numThreads) //Utiliza o intervalo criado
+      //#pragma omp for
+      for (int64_t u = start; u < g.num_nodes(); u+=numThreads) //Cada Thread fica no seu nó, par sempre par, impar sempre impar
         outgoing[u] = scores[u] / g.out_degree(u);
 
       //#pragma omp barrier
       // Pagerank em si, também utiliza o intervalo criado
+      //#pragma omp for schedule(dynamic, 64)
       for (int64_t u = start; u < g.num_nodes(); u+=numThreads) {
         ScoreT sum = 0;
         for (NodeID v : g.in_neigh(u)){
@@ -191,7 +192,7 @@ int main(int argc, char* argv[]) {
   WGraph g = b.MakeGraph();
   std::function<ScoreT*(const WGraph&)> PRBound;
 //  g.print_pma_meta();
-if(omp_get_max_threads() > 1){
+if(omp_get_max_threads() > 1){//Mais que um Thread, vira NUMA
   PRBound = [&cli] (const WGraph &g) {
     return PageRankPullNuma(g, cli.max_iters(), cli.tolerance());
   };
