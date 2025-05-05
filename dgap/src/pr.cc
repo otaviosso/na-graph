@@ -67,21 +67,14 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
       12,13,14,15,16,17,18,19,20,21,22,23,
       36,37,38,39,40,41,42,43,44,45,46,47
     };
-    int64_t start, end;
+    int64_t start;
     if ((tid%node_count) == 0){// pensar na logica direito
       bind_current_thread_to_cpu_list(node0_cpus);
-      int64_t chunk = (vertices0 + n0 - 1) / n0;
-      start = tid * node_count;
-      end   = std::min<int64_t>(vertices0, start + chunk);
+      start = tid;
     }
     else{
       bind_current_thread_to_cpu_list(node1_cpus);
-      int   tid1 = tid - n0;
-      
-      int64_t rem   = num_nodes - vertices0;
-      int64_t chunk = (rem + (numThreads-n0) - 1) / (numThreads-n0);
-      start = vertices0 + tid1 * chunk;
-      end   = std::min<int64_t>(num_nodes, start + chunk);
+      start = tid;
     }
     for (int iter = 0; iter < max_iters; ++iter) {
       //#pragma omp parallel for
@@ -90,9 +83,9 @@ ScoreT *PageRankPullNuma(const WGraph &g, int max_iters, double epsilon = 0) {
 
       //#pragma omp barrier
       // Pagerank em si, também utiliza o intervalo criado
-      for (int64_t u = start; u < end; ++u) {
+      for (int64_t u = start; u < g.num_nodes(); u+=numThreads) {
         ScoreT sum = 0;
-        for (auto v : g.in_neigh(u)){
+        for (NodeID v : g.in_neigh(u)){
           sum += outgoing[v];
           //my_count++;
         }

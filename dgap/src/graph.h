@@ -1214,6 +1214,28 @@ public:
   }
 
   #ifdef NUMA_PMEM
+  #ifdef HASH_MODE
+  int64_t out_degree(NodeID_ v) const {
+    if ((v%node_counter) == 0) {
+        // v pertence ao nó 0
+        return vertices_0[v/2].degree - 1;
+    } else {
+        // v pertence ao nó 1, converte para índice local
+        return vertices_1[v/2].degree - 1;
+    }
+}
+
+int64_t in_degree(NodeID_ v) const {
+    static_assert(MakeInverse, "Graph inversion disabled but reading inverse");
+    if ((v%node_counter) == 0) {
+      // v pertence ao nó 0
+      return vertices_0[v/2].degree - 1;
+  } else {
+      // v pertence ao nó 1, converte para índice local
+      return vertices_1[v/2].degree - 1;
+  }
+}
+  #else
   int64_t out_degree(NodeID_ v) const {
     if (v < n_vertices_node0) {
         // v pertence ao nó 0
@@ -1232,6 +1254,7 @@ int64_t in_degree(NodeID_ v) const {
         return vertices_1[v - n_vertices_node0].degree - 1;
     }
 }
+#endif
   #else
   int64_t out_degree(NodeID_ v) const {
     return vertices_[v].degree - 1;
