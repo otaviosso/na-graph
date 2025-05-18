@@ -42,6 +42,81 @@ more consistent performance for undirected graphs.
 
 using namespace std;
 
+void bind_current_thread_to_cpu_list(const std::vector<int> &cpus) {
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  for (int cpu : cpus) {
+      CPU_SET(cpu, &cpuset);
+  }
+  pthread_t tid = pthread_self();
+  pthread_setaffinity_np(tid, sizeof(cpu_set_t), &cpuset);
+}
+
+
+pvector<NodeID> ShiloachVishkinNUMA(const WGraph &g) {
+  pvector<NodeID> comp(g.num_nodes());
+  #pragma omp parallel for
+  for (NodeID n=0; n < g.num_nodes(); n++)
+    comp[n] = n;
+  bool change = true;
+  int num_iter = 0;
+  while (change) {
+    change = false;
+    num_iter++;
+    // note: this gives better scaleup performance
+    // #pragma omp parallel for schedule(dynamic, 64)
+    #pragma omp parallel
+    {
+        // Bind uma única vez por thread
+      int tid        = omp_get_thread_num();
+      int numThreads = omp_get_num_threads();
+      int n0         = numThreads/2;
+      int node_count = 2;
+      //long int my_count = 0;
+      
+
+      static const std::vector<int> node0_cpus = {
+        0,1,2,3,4,5,6,7,8,9,10,11,
+        24,25,26,27,28,29,30,31,32,33,34,35
+      };
+      static const std::vector<int> node1_cpus = {
+        12,13,14,15,16,17,18,19,20,21,22,23,
+        36,37,38,39,40,41,42,43,44,45,46,47
+      };
+      int64_t start;
+      if ((tid%node_count) == 0){
+        bind_current_thread_to_cpu_list(node0_cpus);
+        start = tid; //Pares
+      }
+      else{
+        bind_current_thread_to_cpu_list(node1_cpus);
+        start = tid;//Impares
+      }
+      for (NodeID u=start; u < g.num_nodes(); u+=numThreads) {
+        for (NodeID v : g.out_neigh(u)) {
+          NodeID comp_u = comp[u];
+          NodeID comp_v = comp[v];
+          if (comp_u == comp_v) continue;
+          // Hooking condition so lower component ID wins independent of direction
+          NodeID high_comp = comp_u > comp_v ? comp_u : comp_v;
+          NodeID low_comp = comp_u + (comp_v - high_comp);
+          if (high_comp == comp[high_comp]) {
+            change = true;
+            comp[high_comp] = low_comp;
+          }
+        }
+      }
+      for (NodeID n=start; n < g.num_nodes(); n+=numThreads) {
+        while (comp[n] != comp[comp[n]]) {
+          comp[n] = comp[comp[n]];
+        }
+      }
+    }
+  }
+  cout << "Shiloach-Vishkin took " << num_iter << " iterations" << endl;
+  return comp;
+}
+
 
 // The hooking condition (comp_u < comp_v) may not coincide with the edge's
 // direction, so we use a min-max swap such that lower component IDs propagate
@@ -140,7 +215,20 @@ bool CCVerifier(const WGraph &g, const pvector<NodeID> &comp) {
   return true;
 }
 
-
+#ifdef NUMA_PMEM
+int main(int argc, char* argv[]) {
+  CLApp cli(argc, argv, "connected-components");
+  if (!cli.ParseArgs())
+    return -1;
+  WeightedBuilder b(cli);
+  WGraph g = b.MakeGraph();
+  if(omp_get_max_threads() > 1)
+    BenchmarkKernel(cli, g, ShiloachVishkinNUMA, PrintCompStats, CCVerifier);
+  else
+    BenchmarkKernel(cli, g, ShiloachVishkin, PrintCompStats, CCVerifier);
+  return 0;
+}
+#else
 int main(int argc, char* argv[]) {
   CLApp cli(argc, argv, "connected-components");
   if (!cli.ParseArgs())
@@ -150,4 +238,5 @@ int main(int argc, char* argv[]) {
   BenchmarkKernel(cli, g, ShiloachVishkin, PrintCompStats, CCVerifier);
   return 0;
 }
+#endif
 
