@@ -130,6 +130,96 @@ void PBFS(const WGraph &g, NodeID source, pvector<NodeID> &path_counts,
   depth_index.push_back(queue.begin());
 }
 
+void bind_current_thread_to_cpu_list(const std::vector<int> &cpus) {
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  for (int cpu : cpus) {
+      CPU_SET(cpu, &cpuset);
+  }
+  pthread_t tid = pthread_self();
+  pthread_setaffinity_np(tid, sizeof(cpu_set_t), &cpuset);
+}
+
+
+pvector<ScoreT> BrandesNUMA(const WGraph &g, SourcePicker<WGraph> &sp,
+                        NodeID num_iters) {
+  pvector<ScoreT> scores(g.num_nodes(), 0);
+  pvector<NodeID> path_counts(g.num_nodes());
+  Bitmap succ(g.num_edges_directed());
+  vector<SlidingQueue<NodeID>::iterator> depth_index;
+  SlidingQueue<NodeID> queue(g.num_nodes());
+
+  pvector<NodeID> degrees(g.num_nodes());
+  ParallelLoadDegrees(g, degrees);
+  pvector<SGOffset> prefix(degrees.size() + 1);
+  ParallelPrefixSum(degrees, prefix);
+  #pragma omp parallel
+  {
+
+    // Bind uma única vez por thread
+    int tid        = omp_get_thread_num();
+    int numThreads = omp_get_num_threads();
+    int n0         = numThreads/2;
+    int node_count = 2;
+    //long int my_count = 0;
+    
+
+    static const std::vector<int> node0_cpus = {
+      0,1,2,3,4,5,6,7,8,9,10,11,
+      24,25,26,27,28,29,30,31,32,33,34,35
+    };
+    static const std::vector<int> node1_cpus = {
+      12,13,14,15,16,17,18,19,20,21,22,23,
+      36,37,38,39,40,41,42,43,44,45,46,47
+    };
+    int64_t start;
+    if ((tid%node_count) == 0){
+      bind_current_thread_to_cpu_list(node0_cpus);
+      start = tid; //Pares
+    }
+    else{
+      bind_current_thread_to_cpu_list(node1_cpus);
+      start = tid;//Impares
+    }
+    for (NodeID iter=0; iter < num_iters; iter++) {
+      NodeID source = sp.PickNext();
+      path_counts.fill(0);
+      depth_index.resize(0);
+      queue.reset();
+      succ.reset();
+      PBFS(g, source, path_counts, succ, depth_index, queue, prefix);
+      pvector<ScoreT> deltas(g.num_nodes(), 0);
+      for (int d=depth_index.size()-2; d >= 0; d--) {
+        //#pragma omp parallel for schedule(dynamic, 64)
+        for (auto it = depth_index[d] + start; it < depth_index[d+1]; it+=numThreads) { //entender melhor
+          NodeID u = *it;
+          ScoreT delta_u = 0;
+          NodeID local_edge_id = 0;
+          for (NodeID v : g.out_neigh(u)) {
+            if (succ.get_bit(GetEdgeId(prefix, u, local_edge_id))) {
+              delta_u += static_cast<ScoreT>(path_counts[u]) /
+                        static_cast<ScoreT>(path_counts[v]) * (1 + deltas[v]);
+            }
+            local_edge_id += 1;
+          }
+          deltas[u] = delta_u;
+          scores[u] += delta_u;
+        }
+      }
+    }
+    // normalize scores
+    ScoreT biggest_score = 0;
+    //#pragma omp parallel for reduction(max : biggest_score)
+    for (NodeID n=start; n < g.num_nodes(); n+=numThreads)
+      biggest_score = max(biggest_score, scores[n]);
+    //#pragma omp parallel for
+    for (NodeID n=start; n < g.num_nodes(); n+=numThreads)
+      scores[n] = scores[n] / biggest_score;
+  }
+  return scores;
+}
+
+
 
 pvector<ScoreT> Brandes(const WGraph &g, SourcePicker<WGraph> &sp,
                         NodeID num_iters) {
@@ -260,7 +350,34 @@ bool BCVerifier(const WGraph &g, SourcePicker<WGraph> &sp, NodeID num_iters,
   return all_ok;
 }
 
+#ifdef NUMA_PMEM
+int main(int argc, char* argv[]) {
+  CLIterApp cli(argc, argv, "betweenness-centrality", 1);
+  if (!cli.ParseArgs())
+    return -1;
+  if (cli.num_iters() > 1 && cli.start_vertex() != -1)
+    cout << "Warning: iterating from same source (-r & -i)" << endl;
+  WeightedBuilder b(cli);
+  WGraph g = b.MakeGraph();
+  SourcePicker<WGraph> sp(g, cli.start_vertex());
+  using BCFunc = std::function<pvector<ScoreT>(const WGraph&)>;
+  BCFunc BCBound;
+  if(omp_get_max_threads() > 1){//Mais que um Thread, vira NUMA
+    BCBound = [&sp, &cli] (const WGraph &g) { return BrandesNUMA(g, sp, cli.num_iters()); };
+  }
+  else{
+    BCBound = [&sp, &cli] (const WGraph &g) { return Brandes(g, sp, cli.num_iters()); };
+  }
+  SourcePicker<WGraph> vsp(g, cli.start_vertex());
+  auto VerifierBound = [&vsp, &cli] (const WGraph &g,
+                                     const pvector<ScoreT> &scores) {
+    return BCVerifier(g, vsp, cli.num_iters(), scores);
+  };
+  BenchmarkKernel(cli, g, BCBound, PrintTopScores, VerifierBound);
+  return 0;
+}
 
+#else
 int main(int argc, char* argv[]) {
   CLIterApp cli(argc, argv, "betweenness-centrality", 1);
   if (!cli.ParseArgs())
@@ -280,3 +397,4 @@ int main(int argc, char* argv[]) {
   BenchmarkKernel(cli, g, BCBound, PrintTopScores, VerifierBound);
   return 0;
 }
+#endif
