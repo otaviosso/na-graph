@@ -141,71 +141,88 @@ void bind_current_thread_to_cpu_list(const std::vector<int> &cpus) {
 }
 
 
+// ----------------  BrandesNUMA corrigido  ----------------
 pvector<ScoreT> BrandesNUMA(const WGraph &g,
                             SourcePicker<WGraph> &sp,
                             NodeID num_iters)
 {
-    // vetor de saída compartilhado
+    /* --- listas de CPUs dos dois nós NUMA (as mesmas que você usava) --- */
+    static const std::vector<int> node0_cpus = {
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,
+       24,25,26,27,28,29,30,31,32,33,34,35
+    };
+    static const std::vector<int> node1_cpus = {
+       12,13,14,15,16,17,18,19,20,21,22,23,
+       36,37,38,39,40,41,42,43,44,45,46,47
+    };
+
+    /* --- prefixo das arestas: igual ao original, mas calculado uma só vez --- */
+    pvector<NodeID> degrees(g.num_nodes());
+    ParallelLoadDegrees(g, degrees);
+    pvector<SGOffset> prefix(degrees.size() + 1);
+    ParallelPrefixSum(degrees, prefix);
+
+    /* --- vetor final compartilhado --- */
     pvector<ScoreT> scores(g.num_nodes(), 0);
 
 #pragma omp parallel
     {
-        // _Binding_ do thread à CPU do nó NUMA
+        /* 1) BINDA o thread ao nó NUMA uma única vez --------------------- */
         int tid = omp_get_thread_num();
         if (tid & 1)
-            bind_current_thread_to_cpu_list(node1_cpus);
+            bind_current_thread_to_cpu_list(node1_cpus);  // ímpares → nó 1
         else
-            bind_current_thread_to_cpu_list(node0_cpus);
+            bind_current_thread_to_cpu_list(node0_cpus);  // pares   → nó 0
 
-        // vetor parcial por-thread (evita `atomic` na maior parte do tempo)
+        /* 2) vetor parcial por-thread  ----------------------------------- */
         pvector<ScoreT> local_scores(g.num_nodes(), 0);
 
+        /* 3) cada thread processa um subconjunto das fontes -------------- */
 #pragma omp for schedule(dynamic)
         for (NodeID iter = 0; iter < num_iters; ++iter) {
 
-            NodeID source = sp.PickNext();          // ATENÇÃO: precisa ser
-                                                    // thread-safe. Se não for,
-                                                    // crie a lista de fontes
-                                                    // antes e use `iter` como
-                                                    // índice.
+            /* SourcePicker NÃO é thread-safe ⇒ usamos região crítica curta */
+            NodeID source;
+#pragma omp critical(source_pick)
+            { source = sp.PickNext(); }
 
-            /* --------  TUDO A PARTIR DAQUI É PRIVADO  -------- */
+            /* -------- estruturas PRIVADAS ao thread -------- */
             pvector<NodeID> path_counts(g.num_nodes());
             Bitmap          succ(g.num_edges_directed());
             std::vector<SlidingQueue<NodeID>::iterator> depth_index;
             SlidingQueue<NodeID> queue(g.num_nodes());
 
-            PBFS(g, source, path_counts, succ, depth_index, queue);
+            PBFS(g, source, path_counts, succ, depth_index, queue, prefix);
 
             pvector<ScoreT> deltas(g.num_nodes(), 0);
             for (int d = depth_index.size() - 2; d >= 0; --d) {
                 for (auto it = depth_index[d]; it < depth_index[d + 1]; ++it) {
-                    NodeID u = *it;
-                    ScoreT delta_u = 0;
-                    NodeID local_edge_id = 0;
+                    NodeID  u        = *it;
+                    ScoreT  delta_u  = 0;
+                    NodeID  edge_id  = 0;
                     for (NodeID v : g.out_neigh(u)) {
-                        if (succ.get_bit(GetEdgeId(prefix, u, local_edge_id))) {
+                        if (succ.get_bit(GetEdgeId(prefix, u, edge_id))) {
                             delta_u += static_cast<ScoreT>(path_counts[u]) /
                                        static_cast<ScoreT>(path_counts[v]) *
                                        (1 + deltas[v]);
                         }
-                        ++local_edge_id;
+                        ++edge_id;
                     }
-                    deltas[u]      = delta_u;
-                    local_scores[u] += delta_u;      // <-- acumula localmente
+                    deltas[u]       = delta_u;
+                    local_scores[u] += delta_u;   // acumula localmente
                 }
             }
-        } /* fim do for num_iters */
+        } /* fim do laço num_iters */
 
-        /* --------  Redução das pontuações  -------- */
-#pragma omp critical
+        /* 4) redução das pontuações -------------------------------------- */
+#pragma omp critical(update_scores)
         {
             for (NodeID n = 0; n < g.num_nodes(); ++n)
                 scores[n] += local_scores[n];
         }
     } /* fim da região parallel */
 
-    /* --------  Normalização  -------- */
+    /* 5) normalização --------------------------------------------------- */
     ScoreT max_score = *std::max_element(scores.begin(), scores.end());
 #pragma omp parallel for
     for (NodeID n = 0; n < g.num_nodes(); ++n)
@@ -213,7 +230,6 @@ pvector<ScoreT> BrandesNUMA(const WGraph &g,
 
     return scores;
 }
-
 
 
 pvector<ScoreT> Brandes(const WGraph &g, SourcePicker<WGraph> &sp,
