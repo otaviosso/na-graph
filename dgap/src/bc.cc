@@ -141,82 +141,77 @@ void bind_current_thread_to_cpu_list(const std::vector<int> &cpus) {
 }
 
 
-pvector<ScoreT> BrandesNUMA(const WGraph &g, SourcePicker<WGraph> &sp,
-                        NodeID num_iters) {
-  pvector<ScoreT> scores(g.num_nodes(), 0);
-  pvector<NodeID> path_counts(g.num_nodes());
-  Bitmap succ(g.num_edges_directed());
-  vector<SlidingQueue<NodeID>::iterator> depth_index;
-  SlidingQueue<NodeID> queue(g.num_nodes());
+pvector<ScoreT> BrandesNUMA(const WGraph &g,
+                            SourcePicker<WGraph> &sp,
+                            NodeID num_iters)
+{
+    // vetor de saída compartilhado
+    pvector<ScoreT> scores(g.num_nodes(), 0);
 
-  pvector<NodeID> degrees(g.num_nodes());
-  ParallelLoadDegrees(g, degrees);
-  pvector<SGOffset> prefix(degrees.size() + 1);
-  ParallelPrefixSum(degrees, prefix);
-  #pragma omp parallel
-  {
+#pragma omp parallel
+    {
+        // _Binding_ do thread à CPU do nó NUMA
+        int tid = omp_get_thread_num();
+        if (tid & 1)
+            bind_current_thread_to_cpu_list(node1_cpus);
+        else
+            bind_current_thread_to_cpu_list(node0_cpus);
 
-    // Bind uma única vez por thread
-    int tid        = omp_get_thread_num();
-    int numThreads = omp_get_num_threads();
-    int n0         = numThreads/2;
-    int node_count = 2;
-    //long int my_count = 0;
-    
+        // vetor parcial por-thread (evita `atomic` na maior parte do tempo)
+        pvector<ScoreT> local_scores(g.num_nodes(), 0);
 
-    static const std::vector<int> node0_cpus = {
-      0,1,2,3,4,5,6,7,8,9,10,11,
-      24,25,26,27,28,29,30,31,32,33,34,35
-    };
-    static const std::vector<int> node1_cpus = {
-      12,13,14,15,16,17,18,19,20,21,22,23,
-      36,37,38,39,40,41,42,43,44,45,46,47
-    };
-    int64_t start;
-    if ((tid%node_count) == 0){
-      bind_current_thread_to_cpu_list(node0_cpus);
-      start = tid; //Pares
-    }
-    else{
-      bind_current_thread_to_cpu_list(node1_cpus);
-      start = tid;//Impares
-    }
-    for (NodeID iter=0; iter < num_iters; iter++) {
-      NodeID source = sp.PickNext();
-      path_counts.fill(0);
-      depth_index.resize(0);
-      queue.reset();
-      succ.reset();
-      PBFS(g, source, path_counts, succ, depth_index, queue, prefix);
-      pvector<ScoreT> deltas(g.num_nodes(), 0);
-      for (int d=depth_index.size()-2; d >= 0; d--) {
-        //#pragma omp parallel for schedule(dynamic, 64)
-        for (auto it = depth_index[d] + start; it < depth_index[d+1]; it+=numThreads) { //entender melhor
-          NodeID u = *it;
-          ScoreT delta_u = 0;
-          NodeID local_edge_id = 0;
-          for (NodeID v : g.out_neigh(u)) {
-            if (succ.get_bit(GetEdgeId(prefix, u, local_edge_id))) {
-              delta_u += static_cast<ScoreT>(path_counts[u]) /
-                        static_cast<ScoreT>(path_counts[v]) * (1 + deltas[v]);
+#pragma omp for schedule(dynamic)
+        for (NodeID iter = 0; iter < num_iters; ++iter) {
+
+            NodeID source = sp.PickNext();          // ATENÇÃO: precisa ser
+                                                    // thread-safe. Se não for,
+                                                    // crie a lista de fontes
+                                                    // antes e use `iter` como
+                                                    // índice.
+
+            /* --------  TUDO A PARTIR DAQUI É PRIVADO  -------- */
+            pvector<NodeID> path_counts(g.num_nodes());
+            Bitmap          succ(g.num_edges_directed());
+            std::vector<SlidingQueue<NodeID>::iterator> depth_index;
+            SlidingQueue<NodeID> queue(g.num_nodes());
+
+            PBFS(g, source, path_counts, succ, depth_index, queue);
+
+            pvector<ScoreT> deltas(g.num_nodes(), 0);
+            for (int d = depth_index.size() - 2; d >= 0; --d) {
+                for (auto it = depth_index[d]; it < depth_index[d + 1]; ++it) {
+                    NodeID u = *it;
+                    ScoreT delta_u = 0;
+                    NodeID local_edge_id = 0;
+                    for (NodeID v : g.out_neigh(u)) {
+                        if (succ.get_bit(GetEdgeId(prefix, u, local_edge_id))) {
+                            delta_u += static_cast<ScoreT>(path_counts[u]) /
+                                       static_cast<ScoreT>(path_counts[v]) *
+                                       (1 + deltas[v]);
+                        }
+                        ++local_edge_id;
+                    }
+                    deltas[u]      = delta_u;
+                    local_scores[u] += delta_u;      // <-- acumula localmente
+                }
             }
-            local_edge_id += 1;
-          }
-          deltas[u] = delta_u;
-          scores[u] += delta_u;
+        } /* fim do for num_iters */
+
+        /* --------  Redução das pontuações  -------- */
+#pragma omp critical
+        {
+            for (NodeID n = 0; n < g.num_nodes(); ++n)
+                scores[n] += local_scores[n];
         }
-      }
-    }
-    // normalize scores
-    ScoreT biggest_score = 0;
-    //#pragma omp parallel for reduction(max : biggest_score)
-    for (NodeID n=start; n < g.num_nodes(); n+=numThreads)
-      biggest_score = max(biggest_score, scores[n]);
-    //#pragma omp parallel for
-    for (NodeID n=start; n < g.num_nodes(); n+=numThreads)
-      scores[n] = scores[n] / biggest_score;
-  }
-  return scores;
+    } /* fim da região parallel */
+
+    /* --------  Normalização  -------- */
+    ScoreT max_score = *std::max_element(scores.begin(), scores.end());
+#pragma omp parallel for
+    for (NodeID n = 0; n < g.num_nodes(); ++n)
+        scores[n] /= max_score;
+
+    return scores;
 }
 
 
